@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <script src="bridge.js"></script>
+    <script src="bridge.js?v=06248f932e"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MRP 回測系統 - 參數調整與回測</title>
@@ -257,6 +257,7 @@
                 </div>
 
                 <!-- 回測結果指標 -->
+                <p id="backtest-period" class="text-sm text-gray-500 hidden"></p>
                 <div id="results-metrics" class="grid grid-cols-2 md:grid-cols-3 gap-4 hidden">
                     <div class="metric-card bg-white rounded-xl shadow-sm p-4 group relative">
                         <div class="text-sm text-gray-500 mb-1 flex items-center">
@@ -1030,7 +1031,11 @@
                 });
                 
                 const result = await response.json();
-                displayComparison(result);
+                if (result.error) {
+                    alert(result.error);
+                } else {
+                    displayComparison(result);
+                }
             } catch (e) {
                 console.error('多組比較失敗:', e);
                 alert('多組比較執行失敗');
@@ -1200,7 +1205,11 @@
                 });
                 
                 const result = await response.json();
-                displayComparison(result);
+                if (result.error) {
+                    alert(result.error);
+                } else {
+                    displayComparison(result);
+                }
             } catch (e) {
                 console.error('比較失敗:', e);
                 alert('方法比較失敗');
@@ -1265,6 +1274,9 @@
         function displayResults(result) {
             // 顯示指標
             document.getElementById('results-metrics').classList.remove('hidden');
+            const periodEl = document.getElementById('backtest-period');
+            periodEl.textContent = `回測期間：${result.backtest_period}（共 ${result.round_details.length} 輪 × 每輪預測 ${result.round_details[0]?.actuals.length ?? 0} 個月）`;
+            periodEl.classList.remove('hidden');
             
             const wmape = result.overall.wmape;
             const mape = result.overall.mape;

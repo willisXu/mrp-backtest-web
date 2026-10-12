@@ -13,7 +13,9 @@
   };
 
   // ---------- 計算 Worker ----------
-  const worker = new Worker("worker.js"); // 立即開始載入，使用者輸入密碼時同步進行
+  // 沿用 bridge.js 的版本號（publish.py 加上的 ?v=），避免載入快取裡的舊 worker.js
+  const VERSION = document.currentScript ? new URL(document.currentScript.src).search : "";
+  const worker = new Worker("worker.js" + VERSION); // 立即開始載入，使用者輸入密碼時同步進行
   const pending = new Map();
   let nextId = 1;
   let lastStatus = "";
@@ -105,18 +107,27 @@
     const err = overlay.querySelector(".err");
     const status = overlay.querySelector(".status");
 
-    let enc;
-    try {
-      enc = await (await realFetch("data.enc", { cache: "no-cache" })).json();
-    } catch (e) {
+    // 送出事件要在下載 data.enc 之前就攔住，否則太早按「進入」會讓表單以預設方式送出並重新整理頁面
+    form.addEventListener("submit", (e) => { e.preventDefault(); unlock(input.value); });
+
+    const encPromise = realFetch("data.enc", { cache: "no-cache" }).then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    });
+    encPromise.catch((e) => {
       err.textContent = "無法讀取資料檔 data.enc";
+      btn.disabled = true; input.disabled = true;
       rejectReady(e);
-      return;
-    }
+    });
 
     async function unlock(password) {
       btn.disabled = true; input.disabled = true; err.textContent = "";
-      let csv;
+      let enc, csv;
+      try {
+        enc = await encPromise;
+      } catch {
+        return; // 錯誤訊息已由 encPromise.catch 顯示
+      }
       try {
         csv = await decrypt(enc, password);
       } catch {
@@ -139,7 +150,6 @@
       }
     }
 
-    form.addEventListener("submit", (e) => { e.preventDefault(); unlock(input.value); });
     const saved = store.get(PW_KEY);
     if (saved) unlock(saved); else input.focus();
   }

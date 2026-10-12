@@ -384,14 +384,16 @@ def run_backtest(
     all_forecasts: list[float] = []
     round_results: list[dict[str, Any]] = []
 
+    # 回測期間對齊資料最後一個月：最後一輪的預測期結束在最新月份；
+    # 每輪以預測期前 training_months 個月訓練，逐輪往後滑動一個月
+    offset = len(ts) - min_required
     for round_idx in range(rolling_rounds):
-        train_end = training_months + round_idx
+        train_start = offset + round_idx
+        train_end = train_start + training_months
         test_start = train_end
         test_end = test_start + forecast_months
-        if test_end > len(ts):
-            break
 
-        train_data = ts.iloc[:train_end]
+        train_data = ts.iloc[train_start:train_end]
         test_data = ts.iloc[test_start:test_end]
         try:
             forecaster.fit(train_data)
@@ -427,6 +429,9 @@ def run_backtest(
 
     actual_arr = np.asarray(all_actuals, dtype=float)
     pred_arr = np.asarray(all_forecasts, dtype=float)
+    if np.sum(actual_arr) <= 0:
+        # 例如已停止出貨的通路：實際與預測都是 0，指標會誤顯示為 0% 誤差
+        return {"error": f"回測期間（{ts.index[offset + training_months].date()} ~ {ts.index[-1].date()}）沒有銷售，無法評估"}
     denom = np.maximum(actual_arr, 1.0)
     errors = np.abs(pred_arr - actual_arr) / denom
 
@@ -444,6 +449,7 @@ def run_backtest(
         "all_actuals": all_actuals,
         "all_forecasts": all_forecasts,
         "round_details": [item for item in round_results if "error" not in item],
+        "backtest_period": f"{ts.index[offset + training_months].date()} ~ {ts.index[-1].date()}",
         "round_results": round_results,
         "overall_wmape": float(np.sum(np.abs(pred_arr - actual_arr)) / max(np.sum(actual_arr), 1.0)),
         "overall_mape": float(np.mean(errors)),
@@ -593,6 +599,8 @@ def compare_methods_api():
         [item for item in results if "overall_wmape" in item],
         key=lambda item: item["overall_wmape"],
     )
+    if not ranking:
+        return jsonify({"error": next((item["error"] for item in results if "error" in item), "沒有可比較的結果")}), 400
     return jsonify({"results": ranking, "ranking": ranking})
 
 
