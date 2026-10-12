@@ -87,6 +87,16 @@
                         </select>
                     </div>
                     
+                    <!-- 預估月均銷方法 -->
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">預估月均銷方法</label>
+                        <select id="forecast-method" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <option value="WeightedMA">現行公式（MA 加權）</option>
+                            <option value="auto">自動：採用此通路回測最準的方法</option>
+                        </select>
+                        <p class="text-xs text-gray-400 mt-1">現行公式以外的方法：用最近 24 個月預測未來 3 個月，取平均作為月均銷；下方 MA 與權重設定只影響現行公式</p>
+                    </div>
+
                     <div class="grid grid-cols-2 gap-6">
                         <!-- 移動平均月份數設定 -->
                         <div class="space-y-4">
@@ -300,6 +310,9 @@
                     </h2>
                     
                     <div class="space-y-4">
+                        <!-- 預測方法 -->
+                        <div id="forecast-method-info" class="bg-indigo-50 rounded-lg p-4 text-sm hidden"></div>
+
                         <!-- 銷售分析 -->
                         <div class="bg-blue-50 rounded-lg p-4">
                             <h3 class="font-medium text-blue-800 mb-2">銷售分析</h3>
@@ -380,6 +393,7 @@
         // 初始化
         document.addEventListener('DOMContentLoaded', () => {
             loadChannels();
+            loadForecastChoices();
             setupSliders();
             document.getElementById('calculate-btn').addEventListener('click', calculate);
         });
@@ -395,6 +409,20 @@
                 ).join('');
             } catch (e) {
                 console.error('載入通路失敗:', e);
+            }
+        }
+
+        // 載入可選的預測方法（現行公式與「自動」已寫在 HTML）
+        async function loadForecastChoices() {
+            try {
+                const response = await fetch('/api/demand-planning/config');
+                const data = await response.json();
+                const select = document.getElementById('forecast-method');
+                (data.forecast_choices || [])
+                    .filter(c => c.key !== 'WeightedMA')
+                    .forEach(c => select.add(new Option(c.label, c.key)));
+            } catch (e) {
+                console.error('載入預測方法失敗:', e);
             }
         }
 
@@ -458,6 +486,7 @@
                     period_3: parseInt(document.getElementById('ma_period_3').value)
                 },
                 use_sell_in_as_sell_out: document.getElementById('use_sell_in_as_sell_out').checked,
+                forecast_method: document.getElementById('forecast-method').value,
                 inventory: {
                     warehouse_stock: parseFloat(document.getElementById('warehouse_stock').value) || 0,
                     in_production: parseFloat(document.getElementById('in_production').value) || 0,
@@ -486,6 +515,7 @@
                 if (result.success) {
                     displayCalculatedMA(result.calculated_ma);
                     displayResults(result);
+                    displayForecastMethod(result.forecast_method);
                 } else {
                     alert('計算失敗: ' + (result.error || '未知錯誤'));
                 }
@@ -508,6 +538,37 @@
             document.getElementById('calc-sell-out-ma1').textContent = ma.sell_out_ma1.toLocaleString(undefined, {maximumFractionDigits: 0});
             document.getElementById('calc-sell-out-ma2').textContent = ma.sell_out_ma2.toLocaleString(undefined, {maximumFractionDigits: 0});
             document.getElementById('calc-sell-out-ma3').textContent = ma.sell_out_ma3.toLocaleString(undefined, {maximumFractionDigits: 0});
+        }
+
+        // 顯示預測方法與回測比較
+        function displayForecastMethod(fm) {
+            const fmt = v => v.toLocaleString(undefined, {maximumFractionDigits: 0});
+            const pct = v => (v * 100).toFixed(1) + '%';
+            const used = fm.requested === 'auto' ? `自動 → ${fm.label}` : fm.label;
+            let html = `<h3 class="font-medium text-indigo-800 mb-2">預估月均銷方法：${used}</h3>`;
+            if (fm.forecast) {
+                html += `<div class="text-gray-600 mb-2">未來 3 個月預測（資料至 ${fm.data_end.slice(0, 7)}）：` +
+                    fm.forecast.months.map(m => `${m.month} <b>${fmt(m.value)}</b>`).join('、') + '</div>';
+            }
+            if (fm.ranking.length) {
+                const current = fm.ranking.find(r => r.key === 'WeightedMA');
+                const rows = fm.ranking.slice(0, 3);
+                if (current && !rows.includes(current)) rows.push(current);
+                html += '<div class="text-gray-600">此通路回測 wMAPE（越低越準）：</div><ol class="mt-1 space-y-0.5">' +
+                    rows.map(r => {
+                        const rank = fm.ranking.indexOf(r) + 1;
+                        const mark = r.key === fm.key ? ' class="font-semibold text-indigo-700"' : '';
+                        return `<li${mark}>${rank}. ${r.label}：${pct(r.wmape)}${r.key === fm.key ? '（使用中）' : ''}</li>`;
+                    }).join('') + '</ol>';
+                if (fm.requested === 'WeightedMA' && fm.ranking[0].key !== 'WeightedMA') {
+                    html += `<div class="mt-2 text-amber-700">建議：此通路以「${fm.ranking[0].label}」回測最準，可改選「自動」。</div>`;
+                }
+            } else {
+                html += '<div class="text-amber-700">此通路資料不足 38 個月，無法回測比較，使用現行公式。</div>';
+            }
+            const box = document.getElementById('forecast-method-info');
+            box.innerHTML = html;
+            box.classList.remove('hidden');
         }
 
         // 顯示結果

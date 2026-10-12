@@ -678,6 +678,45 @@ def _serialize_demand_result(result) -> dict[str, Any]:
     }
 
 
+# 需求計劃可選用的預測方法（key → 顯示名稱、方法、參數）
+FORECAST_CHOICES = {
+    "WeightedMA": ("現行公式（MA 加權）", "WeightedMA", {}),
+    "Seasonal_Naive": ("Seasonal Naive（去年同期）", "Seasonal_Naive", {"seasonal_period": 12}),
+    "HW-add": ("Holt-Winters（加法）", "HoltWinters", {"seasonal_type": "add"}),
+    "HW-mul": ("Holt-Winters（乘法）", "HoltWinters", {"seasonal_type": "mul"}),
+    "SES": ("SES（α=0.2）", "SES", {"alpha": 0.2}),
+    "Holt": ("Holt", "Holt", {"alpha": 0.2, "beta": 0.1}),
+    "SMA-3": ("SMA-3", "SMA", {"window": 3}),
+    "SMA-12": ("SMA-12", "SMA", {"window": 12}),
+    "Naive": ("Naive（上月）", "Naive", {}),
+}
+PLAN_TRAINING_MONTHS = 24  # 與回測預設相同
+PLAN_FORECAST_MONTHS = 3   # 對應製程週期
+
+
+def _rank_forecast_choices(ts: pd.Series) -> list[dict[str, Any]]:
+    """以預設回測設定（訓練 24／預測 3／12 輪）比較各方法，依 wMAPE 由低到高排序。"""
+    ranking = []
+    for key, (label, method, params) in FORECAST_CHOICES.items():
+        result = run_backtest(ts, create_forecaster(method, params))
+        if "overall" in result:
+            ranking.append({"key": key, "label": label, "wmape": result["overall"]["wmape"],
+                            "bias": result["overall"]["bias"]})
+    return sorted(ranking, key=lambda item: item["wmape"])
+
+
+def _forecast_monthly_average(ts: pd.Series, key: str) -> dict[str, Any]:
+    """用最近 PLAN_TRAINING_MONTHS 個月訓練，預測未來 PLAN_FORECAST_MONTHS 個月並取平均。"""
+    _, method, params = FORECAST_CHOICES[key]
+    forecaster = create_forecaster(method, params).fit(ts.iloc[-PLAN_TRAINING_MONTHS:])
+    predictions = np.maximum(np.asarray(forecaster.predict(PLAN_FORECAST_MONTHS), dtype=float), 0.0)
+    months = pd.date_range(ts.index[-1] + pd.offsets.MonthBegin(1), periods=PLAN_FORECAST_MONTHS, freq="MS")
+    return {
+        "months": [{"month": m.strftime("%Y-%m"), "value": float(v)} for m, v in zip(months, predictions)],
+        "monthly_average": float(predictions.mean()),
+    }
+
+
 @app.route("/api/demand-planning/calculate-from-data", methods=["POST"])
 def calculate_demand_planning_from_data():
     payload = request.get_json(silent=True) or {}
@@ -717,6 +756,17 @@ def calculate_demand_planning_from_data():
         production_coefficient=config_data.get("production_coefficient", 7.0),
         order_lead_days=config_data.get("order_lead_days", 60),
     )
+    # 預估月均銷的方法：現行公式（預設）、自動（回測最準）或指定方法
+    ranking = _rank_forecast_choices(ts)
+    requested = payload.get("forecast_method", "WeightedMA")
+    if requested == "auto":
+        chosen = ranking[0]["key"] if ranking else "WeightedMA"
+    elif requested in FORECAST_CHOICES:
+        chosen = requested
+    else:
+        return jsonify({"success": False, "error": f"未知的預測方法：{requested}"})
+    forecast = None if chosen == "WeightedMA" else _forecast_monthly_average(ts, chosen)
+
     inventory_data = payload.get("inventory", {})
     calculator = DemandPlanningCalculator(config)
     result = calculator.calculate_full_plan(
@@ -736,9 +786,18 @@ def calculate_demand_planning_from_data():
             marketing_reserved=inventory_data.get("marketing_reserved", 0),
         ),
         payload.get("confirmed_quantity"),
+        estimated_monthly_sales_override=forecast["monthly_average"] if forecast else None,
     )
 
     response = _serialize_demand_result(result)
+    response["forecast_method"] = {
+        "requested": requested,
+        "key": chosen,
+        "label": FORECAST_CHOICES[chosen][0],
+        "forecast": forecast,
+        "ranking": ranking,
+        "data_end": str(ts.index[-1].date()),
+    }
     response["calculated_ma"] = {
         "sell_in_ma1": sell_in_ma1,
         "sell_in_ma2": sell_in_ma2,
@@ -754,6 +813,7 @@ def calculate_demand_planning_from_data():
 def get_demand_planning_config():
     return jsonify(
         {
+            "forecast_choices": [{"key": key, "label": label} for key, (label, _, _) in FORECAST_CHOICES.items()],
             "config": {
                 "sell_in_weight": {"value": 0.7, "min": 0, "max": 1, "step": 0.05, "label": "Sell-in 權重"},
                 "sell_out_weight": {"value": 0.3, "min": 0, "max": 1, "step": 0.05, "label": "Sell-out 權重"},

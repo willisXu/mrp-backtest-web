@@ -307,7 +307,8 @@ class DemandPlanningCalculator:
         sales: SalesData, 
         inventory: InventoryStatus,
         confirmed_quantity: Optional[float] = None,
-        base_date: Optional[datetime] = None
+        base_date: Optional[datetime] = None,
+        estimated_monthly_sales_override: Optional[float] = None
     ) -> DemandPlanningResult:
         """
         執行完整的需求計劃計算
@@ -317,7 +318,8 @@ class DemandPlanningCalculator:
             inventory: 庫存狀態
             confirmed_quantity: 決議再製量（可選）
             base_date: 基準日期
-            
+            estimated_monthly_sales_override: 指定預估月均銷（可選，取代 MA 加權公式的結果）
+
         Returns:
             完整的需求計劃結果
         """
@@ -327,6 +329,9 @@ class DemandPlanningCalculator:
         # 1. 計算預估月均銷
         sell_in_avg, sell_out_avg, estimated_monthly_sales = \
             self.calculate_estimated_monthly_sales(sales)
+        if estimated_monthly_sales_override is not None:
+            # 改用其他預測方法的結果（例如依回測選出的方法），後續公式不變
+            estimated_monthly_sales = round(estimated_monthly_sales_override, self.config.round_precision)
         
         # 2. 計算 ROP
         rop = self.calculate_rop(estimated_monthly_sales)
