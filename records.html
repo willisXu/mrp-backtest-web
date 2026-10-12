@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <script src="bridge.js?v=397189af83"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>回測紀錄 - MRP 生產預測回測</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="static/backtest_view.js?v=397189af83"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans TC', sans-serif; }
+        .tab-active { border-color: #4f46e5; color: #4338ca; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <header class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+                <h1 class="text-xl font-bold text-gray-800">回測紀錄</h1>
+                <p class="text-sm text-gray-500">跑過的回測結果，直接查看不必重跑</p>
+            </div>
+            <nav class="flex items-center gap-3 text-sm">
+                <a href="index.html" class="px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50">參數調整與回測</a>
+                <a href="demand-planning.html" class="px-4 py-2 rounded-lg bg-gradient-to-r from-green-500 to-teal-600 text-white hover:from-green-600 hover:to-teal-700">需求計劃公式</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+        <div class="flex gap-6 border-b">
+            <button data-tab="shared" class="tab pb-2 border-b-2 border-transparent font-medium text-gray-600 tab-active">共用回測總表</button>
+            <button data-tab="mine" class="tab pb-2 border-b-2 border-transparent font-medium text-gray-600">我的紀錄 <span id="mine-count" class="text-xs text-gray-400"></span></button>
+        </div>
+
+        <!-- 共用回測總表 -->
+        <section id="tab-shared" class="space-y-4">
+            <div id="shared-meta" class="text-sm text-gray-500">載入中…</div>
+            <div class="bg-white rounded-xl shadow-sm p-4 flex flex-wrap gap-3 items-end">
+                <label class="text-sm">資料
+                    <select id="f-dataset" class="block mt-1 px-3 py-2 border rounded-lg"></select>
+                </label>
+                <label class="text-sm">層級
+                    <select id="f-group" class="block mt-1 px-3 py-2 border rounded-lg"></select>
+                </label>
+                <label class="text-sm flex-1 min-w-[12rem]">搜尋
+                    <input id="f-search" type="search" placeholder="通路、系列、料號或品名" class="block w-full mt-1 px-3 py-2 border rounded-lg">
+                </label>
+                <label class="text-sm flex items-center gap-2 pb-2">
+                    <input id="f-ok" type="checkbox" checked> 只看可回測
+                </label>
+            </div>
+            <div id="shared-stats" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
+            <div class="bg-white rounded-xl shadow-sm p-4">
+                <div class="overflow-x-auto max-h-[28rem]">
+                    <table class="w-full text-sm">
+                        <thead class="sticky top-0 bg-gray-50 text-gray-600">
+                            <tr>
+                                <th class="px-3 py-2 text-left">對象</th>
+                                <th class="px-3 py-2 text-right">近 12 個月銷售</th>
+                                <th class="px-3 py-2 text-left">最準方法</th>
+                                <th class="px-3 py-2 text-right">最準 wMAPE</th>
+                                <th class="px-3 py-2 text-right">需求計劃公式</th>
+                                <th class="px-3 py-2 text-right">公式名次</th>
+                            </tr>
+                        </thead>
+                        <tbody id="shared-tbody"></tbody>
+                    </table>
+                </div>
+                <p class="text-xs text-gray-400 mt-2">依近 12 個月銷售由大到小排列；點選任一列查看方法排名與結果解讀。</p>
+            </div>
+        </section>
+
+        <!-- 我的紀錄 -->
+        <section id="tab-mine" class="space-y-4 hidden">
+            <div class="bg-white rounded-xl shadow-sm p-4">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                    <p class="text-sm text-gray-500">在「參數調整與回測」「需求計劃公式」頁跑過的回測會自動存在這裡（最多 30 筆）。
+                        紀錄只存在這台電腦的瀏覽器中，並以登入密碼加密；換電腦或清除瀏覽器資料後不會保留。</p>
+                    <button id="clear-mine" class="text-sm text-red-600 hover:text-red-800">全部清除</button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 text-gray-600">
+                            <tr>
+                                <th class="px-3 py-2 text-left">時間</th>
+                                <th class="px-3 py-2 text-left">類型</th>
+                                <th class="px-3 py-2 text-left">資料／對象</th>
+                                <th class="px-3 py-2 text-left">結果</th>
+                                <th class="px-3 py-2 text-right"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="mine-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- 明細 -->
+        <section id="detail" class="space-y-6 hidden">
+            <div class="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 id="detail-title" class="text-xl font-bold text-gray-800"></h2>
+                <span id="detail-meta" class="text-sm text-gray-500"></span>
+            </div>
+            <div id="detail-ranking" class="bg-white rounded-xl shadow-sm p-6"></div>
+            <div id="detail-body" class="space-y-6"></div>
+        </section>
+
+        <div id="guide"></div>
+    </main>
+
+    <div id="loading-overlay" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-xl p-8 text-gray-600">計算中...</div>
+    </div>
+
+    <script>
+        const KIND = { compare: '方法比較', single: '單一方法', demand: '需求計劃公式' };
+        let shared = null;
+        let view = null;  // {record, ctx}
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            document.getElementById('guide').innerHTML = BV.guideHTML();
+            document.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+            ['f-dataset', 'f-group', 'f-search', 'f-ok'].forEach(id =>
+                document.getElementById(id).addEventListener('input', renderShared));
+            document.getElementById('f-dataset').addEventListener('change', fillGroups);
+            document.getElementById('clear-mine').addEventListener('click', async () => {
+                if (!confirm('確定清除這台電腦上的全部回測紀錄？')) return;
+                await BV.Records.clear();
+                renderMine();
+            });
+            renderMine();
+            shared = await BV.loadShared();
+            initShared();
+        });
+
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(b => b.classList.toggle('tab-active', b.dataset.tab === tab));
+            document.getElementById('tab-shared').classList.toggle('hidden', tab !== 'shared');
+            document.getElementById('tab-mine').classList.toggle('hidden', tab !== 'mine');
+            document.getElementById('detail').classList.add('hidden');
+            if (tab === 'mine') renderMine();
+        }
+
+        // ---------- 共用回測總表 ----------
+        function initShared() {
+            const meta = document.getElementById('shared-meta');
+            if (!shared) {
+                meta.textContent = '尚未產生共用回測總表（本機請執行 python build_backtest_records.py）。';
+                return;
+            }
+            const c = shared.config;
+            const ends = Object.values(shared.datasets).map(d => `${d.label} 至 ${d.data_end}`).join('、');
+            meta.textContent = `資料更新於 ${shared.data_updated}｜${ends}｜每輪訓練 ${c.training_months} 個月、預測 ${c.forecast_months} 個月，共 ${c.rolling_rounds} 輪｜比較 11 種方法`;
+            const ds = document.getElementById('f-dataset');
+            ds.innerHTML = Object.entries(shared.datasets).map(([k, d]) => `<option value="${k}">${BV.esc(d.label)}（${d.unit}）</option>`).join('');
+            fillGroups();
+        }
+
+        function fillGroups() {
+            const dataset = document.getElementById('f-dataset').value;
+            const groups = [...new Set(shared.entries.filter(e => e.dataset === dataset).map(e => e.group))];
+            document.getElementById('f-group').innerHTML = groups.map(g => `<option>${g}</option>`).join('');
+            renderShared();
+        }
+
+        function filteredEntries() {
+            const dataset = document.getElementById('f-dataset').value;
+            const group = document.getElementById('f-group').value;
+            const q = document.getElementById('f-search').value.trim().toLowerCase();
+            const okOnly = document.getElementById('f-ok').checked;
+            return shared.entries
+                .filter(e => e.dataset === dataset && e.group === group)
+                .filter(e => !okOnly || e.results)
+                .filter(e => !q || e.name.toLowerCase().includes(q))
+                .sort((a, b) => b.volume - a.volume);
+        }
+
+        function renderShared() {
+            if (!shared) return;
+            const dataset = document.getElementById('f-dataset').value;
+            const unit = shared.datasets[dataset].unit;
+            const entries = filteredEntries();
+            const ok = entries.filter(e => e.results);
+            const formulaOf = e => e.results.find(r => r.method === BV.FORMULA);
+
+            // 統計：需求計劃公式最準幾筆、最常勝出的方法、依銷售加權的平均誤差
+            const wins = {};
+            ok.forEach(e => { wins[e.results[0].label] = (wins[e.results[0].label] || 0) + 1; });
+            const topWin = Object.entries(wins).sort((a, b) => b[1] - a[1])[0];
+            const formulaBest = ok.filter(e => e.results[0].method === BV.FORMULA).length;
+            const vol = ok.reduce((s, e) => s + e.volume, 0) || 1;
+            const wBest = ok.reduce((s, e) => s + e.results[0].overall.wmape * e.volume, 0) / vol;
+            const wFormula = ok.reduce((s, e) => s + (formulaOf(e)?.overall.wmape || 0) * e.volume, 0) / vol;
+            const card = (title, value, note) => `<div class="bg-white rounded-xl shadow-sm p-4">
+                <div class="text-xs text-gray-500">${title}</div><div class="text-2xl font-bold text-gray-800 mt-1">${value}</div>
+                <div class="text-xs text-gray-500 mt-1">${note}</div></div>`;
+            document.getElementById('shared-stats').innerHTML = ok.length ? [
+                card('需求計劃公式最準', `${formulaBest} / ${ok.length}`, `可回測的 ${ok.length} 筆中，現行公式排第 1 的筆數`),
+                card('最常勝出的方法', BV.esc(topWin[0]), `${topWin[1]} 筆排第 1`),
+                card('平均誤差（依銷售加權）', `${BV.pct(wFormula)} → ${BV.pct(wBest)}`,
+                     `需求計劃公式 → 每筆改用最準方法（事後挑選，實際效果會略差）`),
+            ].join('') : '';
+
+            document.getElementById('shared-tbody').innerHTML = entries.map(e => {
+                if (!e.results) {
+                    return `<tr class="border-b text-gray-400"><td class="px-3 py-2">${BV.esc(e.name)}</td>
+                        <td class="px-3 py-2 text-right">${BV.qty(e.volume, unit)}</td>
+                        <td class="px-3 py-2" colspan="4">${BV.esc(e.error || '無法回測')}（資料 ${e.n_months} 個月）</td></tr>`;
+                }
+                const best = e.results[0], f = formulaOf(e);
+                const rank = e.results.indexOf(f) + 1;
+                const rt = BV.rating('wmape', best.overall.wmape);
+                return `<tr data-id="${BV.esc(e.id)}" class="border-b cursor-pointer hover:bg-indigo-50">
+                    <td class="px-3 py-2 font-medium">${BV.esc(e.name)}</td>
+                    <td class="px-3 py-2 text-right">${BV.qty(e.volume, unit)}</td>
+                    <td class="px-3 py-2">${BV.esc(best.label)}</td>
+                    <td class="px-3 py-2 text-right font-semibold text-${rt.color}-700">${BV.pct(best.overall.wmape)}</td>
+                    <td class="px-3 py-2 text-right">${f ? BV.pct(f.overall.wmape) : '-'}</td>
+                    <td class="px-3 py-2 text-right ${rank === 1 ? 'text-green-700 font-semibold' : rank > 5 ? 'text-red-600' : ''}">${f ? rank : '-'}</td></tr>`;
+            }).join('') || '<tr><td class="px-3 py-6 text-center text-gray-400" colspan="6">沒有符合的項目</td></tr>';
+            document.querySelectorAll('#shared-tbody tr[data-id]').forEach(tr => tr.addEventListener('click', () => {
+                const e = shared.entries.find(x => x.id === tr.dataset.id);
+                const ds = shared.datasets[e.dataset];
+                showRecord({
+                    kind: 'compare', source: 'shared', dataset: e.dataset, dataset_label: ds.label, unit: ds.unit,
+                    channel: e.channel, series: e.series, title: e.name, config: shared.config,
+                    backtest_period: e.backtest_period, results: e.results, data_end: ds.data_end
+                }, `共用回測總表｜${ds.label}｜資料至 ${ds.data_end}`);
+            }));
+        }
+
+        // ---------- 我的紀錄 ----------
+        function recordTitle(r) {
+            if (r.title) return r.title;
+            const parts = [r.channel_name || r.channel, r.series_name || r.series].filter(x => x && x !== 'ALL' && x !== '全部系列');
+            return parts.join(' / ') || '全部';
+        }
+
+        async function renderMine() {
+            const list = await BV.Records.list();
+            document.getElementById('mine-count').textContent = list.length ? `(${list.length})` : '';
+            document.getElementById('mine-tbody').innerHTML = list.map(r => {
+                const best = r.results[0];
+                const f = r.results.find(x => x.method === BV.FORMULA);
+                const summary = r.results.length > 1
+                    ? `最準：${BV.esc(best.label)} ${BV.pct(best.overall.wmape)}${f && f !== best ? `｜公式 ${BV.pct(f.overall.wmape)}` : ''}`
+                    : `${BV.esc(best.label)}：wMAPE ${BV.pct(best.overall.wmape)}`;
+                return `<tr class="border-b hover:bg-indigo-50">
+                    <td class="px-3 py-2 whitespace-nowrap">${BV.esc(r.created_at)}</td>
+                    <td class="px-3 py-2">${KIND[r.kind] || r.kind}</td>
+                    <td class="px-3 py-2">${BV.esc(r.dataset_label)}<div class="text-gray-500">${BV.esc(recordTitle(r))}</div></td>
+                    <td class="px-3 py-2">${summary}</td>
+                    <td class="px-3 py-2 text-right whitespace-nowrap">
+                        <button data-view="${r.id}" class="text-indigo-700 hover:underline">查看</button>
+                        <button data-del="${r.id}" class="ml-3 text-red-600 hover:underline">刪除</button></td></tr>`;
+            }).join('') || '<tr><td class="px-3 py-6 text-center text-gray-400" colspan="5">還沒有紀錄</td></tr>';
+            document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => {
+                const r = list.find(x => x.id === b.dataset.view);
+                showRecord(r, `我的紀錄｜${r.created_at}｜${r.dataset_label}`);
+            }));
+            document.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+                await BV.Records.remove(b.dataset.del);
+                document.getElementById('detail').classList.add('hidden');
+                renderMine();
+            }));
+        }
+
+        // ---------- 明細 ----------
+        function showRecord(record, meta) {
+            const results = record.results;
+            const pool = results.length > 1 ? results : (record.reference || []);
+            const formula = results.find(r => r.method === BV.FORMULA) || pool.find(r => r.method === BV.FORMULA);
+            const ctx = {
+                unit: record.unit, config: record.config, results: pool, best: pool[0], formula,
+                period: record.backtest_period?.replace(/(\d{4}-\d{2})-01/g, '$1').replace(' ~ ', '～'),
+                skipped: record.skipped, subtitle: `${record.dataset_label}｜${recordTitle(record)}`
+            };
+            view = { record, ctx };
+            document.getElementById('detail-title').textContent = recordTitle(record);
+            document.getElementById('detail-meta').textContent = meta;
+            const ranking = document.getElementById('detail-ranking');
+            if (results.length > 1) {
+                BV.renderRanking(ranking, results, ctx, showDetail);
+                ranking.classList.remove('hidden');
+            } else {
+                ranking.classList.add('hidden');
+            }
+            const focus = record.focus && results.find(r => r.method === record.focus);
+            showDetail(focus || results[0]);
+            const section = document.getElementById('detail');
+            section.classList.remove('hidden');
+            section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        async function showDetail(r) {
+            const { record, ctx } = view;
+            if (!r.rounds) {
+                // 共用總表只存最準方法與需求計劃公式的逐輪明細，其他方法點選時再算
+                document.getElementById('loading-overlay').classList.remove('hidden');
+                try {
+                    const response = await fetch('/api/backtest/run', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ dataset: record.dataset, channel: record.channel, series: record.series,
+                                               method: r.method, params: r.params, backtest_config: record.config })
+                    });
+                    const res = await response.json();
+                    if (res.error) { alert(res.error); return; }
+                    r.rounds = BV.compact(res).rounds;
+                } finally {
+                    document.getElementById('loading-overlay').classList.add('hidden');
+                }
+            }
+            BV.renderDetail(document.getElementById('detail-body'), r, ctx);
+        }
+    </script>
+</body>
+</html>

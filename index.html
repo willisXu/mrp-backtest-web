@@ -1,12 +1,13 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <script src="bridge.js?v=a68c226316"></script>
+    <script src="bridge.js?v=397189af83"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MRP 回測系統 - 參數調整與回測</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="static/backtest_view.js?v=397189af83"></script>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Noto Sans TC', sans-serif; }
@@ -64,6 +65,9 @@
                     </div>
                 </div>
                 <div class="flex items-center space-x-4">
+                    <a href="records.html" class="bg-white border border-indigo-300 text-indigo-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-50 transition-all">
+                        回測紀錄
+                    </a>
                     <a href="demand-planning.html" class="bg-gradient-to-r from-green-500 to-teal-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:from-green-600 hover:to-teal-700 transition-all">
                         需求計劃公式
                     </a>
@@ -177,7 +181,7 @@
                         </label>
                         <label class="flex items-center p-3 bg-green-50 rounded-lg cursor-pointer hover:bg-green-100 transition-colors border-2 border-green-200">
                             <input type="radio" name="method" value="WeightedMA" class="text-green-600 focus:ring-green-500">
-                            <span class="ml-3 text-sm font-medium text-gray-700">加權移動平均 📋自訂公式</span>
+                            <span class="ml-3 text-sm font-medium text-gray-700">需求計劃公式（現行 MA 加權）</span>
                         </label>
                     </div>
                 </div>
@@ -247,7 +251,7 @@
                 <!-- 預設方法快速比較 -->
                 <div class="flex">
                     <button id="compare-methods" class="w-full bg-white border-2 border-indigo-500 text-indigo-600 py-3 px-6 rounded-lg font-medium hover:bg-indigo-50 transition-all duration-300">
-                        快速比較預設方法
+                        快速比較預設方法（11 種，含需求計劃公式）
                     </button>
                 </div>
             </div>
@@ -264,153 +268,21 @@
                     <p id="formula-suitable" class="text-white/70 text-xs mt-2">適用：需求波動小的成熟商品</p>
                 </div>
 
-                <!-- 回測結果指標 -->
-                <p id="backtest-period" class="text-sm text-gray-500 hidden"></p>
-                <div id="results-metrics" class="grid grid-cols-2 md:grid-cols-3 gap-4 hidden">
-                    <div class="metric-card bg-white rounded-xl shadow-sm p-4 group relative">
-                        <div class="text-sm text-gray-500 mb-1 flex items-center">
-                            wMAPE
-                            <span class="ml-1 text-gray-400 cursor-help" title="加權平均絕對百分比誤差">ⓘ</span>
-                        </div>
-                        <div id="metric-wmape" class="text-2xl font-bold text-indigo-600">-</div>
-                        <div id="metric-wmape-hint" class="text-xs text-gray-500 mt-1">-</div>
-                        <div class="hidden group-hover:block absolute z-10 bg-gray-800 text-white text-xs rounded-lg p-3 w-64 -top-2 left-full ml-2 shadow-lg">
-                            <strong>wMAPE (加權平均絕對百分比誤差)</strong><br>
-                            以實際銷量加權的誤差指標，對高銷量月份更敏感。<br>
-                            <span class="text-green-300">• &lt;10%：優秀</span><br>
-                            <span class="text-yellow-300">• 10-20%：良好</span><br>
-                            <span class="text-orange-300">• 20-30%：可接受</span><br>
-                            <span class="text-red-300">• &gt;30%：需改善</span>
-                        </div>
-                    </div>
-                    <div class="metric-card bg-white rounded-xl shadow-sm p-4 group relative">
-                        <div class="text-sm text-gray-500 mb-1 flex items-center">
-                            MAPE
-                            <span class="ml-1 text-gray-400 cursor-help">ⓘ</span>
-                        </div>
-                        <div id="metric-mape" class="text-2xl font-bold text-purple-600">-</div>
-                        <div id="metric-mape-hint" class="text-xs text-gray-500 mt-1">-</div>
-                        <div class="hidden group-hover:block absolute z-10 bg-gray-800 text-white text-xs rounded-lg p-3 w-64 -top-2 left-full ml-2 shadow-lg">
-                            <strong>MAPE (平均絕對百分比誤差)</strong><br>
-                            每月誤差百分比的平均值，對所有月份權重相同。<br>
-                            <span class="text-green-300">• &lt;10%：高準確度</span><br>
-                            <span class="text-yellow-300">• 10-20%：良好預測</span><br>
-                            <span class="text-orange-300">• 20-50%：合理預測</span><br>
-                            <span class="text-red-300">• &gt;50%：不準確</span>
-                        </div>
-                    </div>
-                    <div class="metric-card bg-white rounded-xl shadow-sm p-4 group relative">
-                        <div class="text-sm text-gray-500 mb-1 flex items-center">
-                            Bias
-                            <span class="ml-1 text-gray-400 cursor-help">ⓘ</span>
-                        </div>
-                        <div id="metric-bias" class="text-2xl font-bold text-pink-600">-</div>
-                        <div id="metric-bias-hint" class="text-xs text-gray-500 mt-1">-</div>
-                        <div class="hidden group-hover:block absolute z-10 bg-gray-800 text-white text-xs rounded-lg p-3 w-64 -top-2 left-full ml-2 shadow-lg">
-                            <strong>Bias (預測偏差)</strong><br>
-                            正值=預測偏高(過度樂觀)，負值=預測偏低(過度保守)。<br>
-                            <span class="text-green-300">• ±5%內：無明顯偏差</span><br>
-                            <span class="text-yellow-300">• ±5-15%：輕微偏差</span><br>
-                            <span class="text-red-300">• &gt;±15%：系統性偏差</span><br>
-                            理想值接近 0%
-                        </div>
-                    </div>
-                    <div class="metric-card bg-white rounded-xl shadow-sm p-4 group relative">
-                        <div class="text-sm text-gray-500 mb-1 flex items-center">
-                            RMSE
-                            <span class="ml-1 text-gray-400 cursor-help">ⓘ</span>
-                        </div>
-                        <div id="metric-rmse" class="text-2xl font-bold text-blue-600">-</div>
-                        <div id="metric-rmse-hint" class="text-xs text-gray-500 mt-1">-</div>
-                        <div class="hidden group-hover:block absolute z-10 bg-gray-800 text-white text-xs rounded-lg p-3 w-64 -top-2 left-full ml-2 shadow-lg">
-                            <strong>RMSE (均方根誤差)</strong><br>
-                            預測誤差的標準差，單位與銷量相同。<br>
-                            對大誤差更敏感，適合評估極端情況。<br>
-                            數值越小越好，可與平均銷量比較判斷。
-                        </div>
-                    </div>
-                    <div class="metric-card bg-white rounded-xl shadow-sm p-4 group relative">
-                        <div class="text-sm text-gray-500 mb-1 flex items-center">
-                            ±10% 準確率
-                            <span class="ml-1 text-gray-400 cursor-help">ⓘ</span>
-                        </div>
-                        <div id="metric-acc10" class="text-2xl font-bold text-green-600">-</div>
-                        <div id="metric-acc10-hint" class="text-xs text-gray-500 mt-1">-</div>
-                        <div class="hidden group-hover:block absolute z-10 bg-gray-800 text-white text-xs rounded-lg p-3 w-64 -top-2 left-full ml-2 shadow-lg">
-                            <strong>±10% 準確率</strong><br>
-                            預測值落在實際值 ±10% 範圍內的比例。<br>
-                            <span class="text-green-300">• &gt;70%：優秀</span><br>
-                            <span class="text-yellow-300">• 50-70%：良好</span><br>
-                            <span class="text-orange-300">• 30-50%：可接受</span><br>
-                            <span class="text-red-300">• &lt;30%：需改善</span>
-                        </div>
-                    </div>
-                    <div class="metric-card bg-white rounded-xl shadow-sm p-4 group relative">
-                        <div class="text-sm text-gray-500 mb-1 flex items-center">
-                            ±20% 準確率
-                            <span class="ml-1 text-gray-400 cursor-help">ⓘ</span>
-                        </div>
-                        <div id="metric-acc20" class="text-2xl font-bold text-teal-600">-</div>
-                        <div id="metric-acc20-hint" class="text-xs text-gray-500 mt-1">-</div>
-                        <div class="hidden group-hover:block absolute z-10 bg-gray-800 text-white text-xs rounded-lg p-3 w-64 -top-2 left-full ml-2 shadow-lg">
-                            <strong>±20% 準確率</strong><br>
-                            預測值落在實際值 ±20% 範圍內的比例。<br>
-                            <span class="text-green-300">• &gt;80%：優秀</span><br>
-                            <span class="text-yellow-300">• 60-80%：良好</span><br>
-                            <span class="text-orange-300">• 40-60%：可接受</span><br>
-                            <span class="text-red-300">• &lt;40%：需改善</span>
-                        </div>
-                    </div>
+                <!-- 結果來源（現成紀錄或剛計算） -->
+                <div id="result-banner" class="hidden rounded-lg px-4 py-3 text-sm flex flex-wrap items-center justify-between gap-2"></div>
+
+                <!-- 方法排名 -->
+                <div id="ranking-panel" class="bg-white rounded-xl shadow-sm p-6 hidden"></div>
+
+                <!-- 單一方法明細（結果解讀、指標、圖表、逐輪明細） -->
+                <div id="detail-panel" class="space-y-6 hidden"></div>
+
+                <div id="empty-hint" class="bg-white rounded-xl shadow-sm p-6 text-sm text-gray-500">
+                    選擇資料與對象後，按「執行回測」看單一方法，或按「快速比較」一次比較 11 種方法（含需求計劃公式）。
+                    跑過的結果會自動存到「回測紀錄」，下次同樣的查詢會直接顯示，不必重跑。
                 </div>
 
-                <!-- 圖表區域 -->
-                <div class="bg-white rounded-xl shadow-sm p-6">
-                    <h3 class="text-lg font-semibold text-gray-800 mb-4">預測 vs 實際</h3>
-                    <div class="h-80">
-                        <canvas id="forecast-chart"></canvas>
-                    </div>
-                </div>
-
-                <!-- 方法比較表 -->
-                <div id="comparison-table" class="bg-white rounded-xl shadow-sm p-6 hidden">
-                    <h3 class="text-lg font-semibold text-gray-800 mb-4">方法比較結果</h3>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm">
-                            <thead>
-                                <tr class="bg-gray-50">
-                                    <th class="px-4 py-3 text-left font-semibold text-gray-700">排名</th>
-                                    <th class="px-4 py-3 text-left font-semibold text-gray-700">方法</th>
-                                    <th class="px-4 py-3 text-right font-semibold text-gray-700">wMAPE</th>
-                                    <th class="px-4 py-3 text-right font-semibold text-gray-700">MAPE</th>
-                                    <th class="px-4 py-3 text-right font-semibold text-gray-700">Bias</th>
-                                    <th class="px-4 py-3 text-right font-semibold text-gray-700">±20%準確</th>
-                                </tr>
-                            </thead>
-                            <tbody id="comparison-tbody">
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- 回測輪次明細 -->
-                <div id="round-details" class="bg-white rounded-xl shadow-sm p-6 hidden">
-                    <h3 class="text-lg font-semibold text-gray-800 mb-4">回測輪次明細</h3>
-                    <div class="overflow-x-auto max-h-64">
-                        <table class="w-full text-sm">
-                            <thead class="sticky top-0 bg-white">
-                                <tr class="bg-gray-50">
-                                    <th class="px-3 py-2 text-left font-semibold text-gray-700">輪次</th>
-                                    <th class="px-3 py-2 text-left font-semibold text-gray-700">訓練截止</th>
-                                    <th class="px-3 py-2 text-left font-semibold text-gray-700">測試期間</th>
-                                    <th class="px-3 py-2 text-right font-semibold text-gray-700">wMAPE</th>
-                                    <th class="px-3 py-2 text-right font-semibold text-gray-700">Bias</th>
-                                </tr>
-                            </thead>
-                            <tbody id="round-tbody">
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+                <div id="guide-panel"></div>
             </div>
         </div>
     </main>
@@ -476,11 +348,12 @@
     <script>
         // 全域變數
         let formulaInfo = {};
-        let forecastChart = null;
+        let datasetInfo = {};
 
         // 初始化
         document.addEventListener('DOMContentLoaded', async () => {
             try {
+                document.getElementById('guide-panel').innerHTML = BV.guideHTML();
                 await loadDataInfo();
                 document.getElementById('dataset-select').addEventListener('change', loadDataInfo);
                 await loadFormulaInfo();
@@ -498,6 +371,7 @@
                 const response = await fetch('/api/data/info?dataset=' + dataset);
                 const data = await response.json();
                 if (data.error) { alert(data.error); return; }
+                datasetInfo = data;
                 const meta = data.datasets?.[dataset] || {};
                 document.getElementById('series-label').textContent =
                     meta.item_label === '料號' ? '料號（近 12 個月銷量前 150）' : '商品系列';
@@ -1021,41 +895,9 @@
                 alert('請至少加入 2 組公式進行比較');
                 return;
             }
-            
-            const channel = document.getElementById('channel-select').value;
-            const backtestConfig = {
-                training_months: parseInt(document.getElementById('training-months').value),
-                forecast_months: parseInt(document.getElementById('forecast-months').value),
-                rolling_rounds: parseInt(document.getElementById('rolling-rounds').value)
-            };
-            
-            const series = document.getElementById('series-select').value;
-            const methods = formulaCompareList.map(item => ({
-                method: item.method,
-                params: item.params
-            }));
-            
-            showLoading(true);
-            
-            try {
-                const response = await fetch('/api/backtest/compare', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ dataset: document.getElementById('dataset-select').value, channel, series, methods, backtest_config: backtestConfig })
-                });
-                
-                const result = await response.json();
-                if (result.error) {
-                    alert(result.error);
-                } else {
-                    displayComparison(result);
-                }
-            } catch (e) {
-                console.error('多組比較失敗:', e);
-                alert('多組比較執行失敗');
-            } finally {
-                showLoading(false);
-            }
+            const methods = formulaCompareList.map(item => ({ method: item.method, params: item.params }));
+            const q = currentQuery('compare', methods);
+            await runWithRecords(q, () => computeCompare(q, methods));
         }
 
         // 更新方法參數
@@ -1149,34 +991,96 @@
             return params;
         }
 
-        // 執行回測
+        // 執行回測（單一方法）
         async function runBacktest() {
             const method = document.querySelector('input[name="method"]:checked').value;
             const params = getCurrentParams();
-            const channel = document.getElementById('channel-select').value;
-            const series = document.getElementById('series-select').value;
-            const backtestConfig = {
-                training_months: parseInt(document.getElementById('training-months').value),
-                forecast_months: parseInt(document.getElementById('forecast-months').value),
-                rolling_rounds: parseInt(document.getElementById('rolling-rounds').value)
+            const q = currentQuery('single', [{ method, params }]);
+            await runWithRecords(q, async () => {
+                const result = await postJSON('/api/backtest/run', requestBody(q, { method, params }));
+                if (result.error) { alert(result.error); return null; }
+                const out = { backtest_period: result.backtest_period, results: [BV.compact(result)] };
+                // 有共用回測總表時，附上同一對象各方法的指標作為比較基準（不含逐輪明細）
+                const hit = await BV.findShared(q.dataset, q.channel, q.series, q.config, q.data_end);
+                if (hit) out.reference = hit.entry.results.map(r => ({ label: r.label, method: r.method, overall: r.overall }));
+                return out;
+            });
+        }
+
+        // 快速比較預設方法（方法組合由伺服器提供，與共用回測總表相同）
+        async function compareMethods() {
+            const q = currentQuery('compare', 'default');
+            await runWithRecords(q, () => computeCompare(q, null));
+        }
+
+        // ---------- 顯示結果（共用模組 static/backtest_view.js） ----------
+        let currentView = null;   // {record, ctx}
+
+        function currentQuery(kind, methods) {
+            const datasetSel = document.getElementById('dataset-select');
+            const seriesSel = document.getElementById('series-select');
+            const channelSel = document.getElementById('channel-select');
+            return {
+                kind,
+                dataset: datasetSel.value,
+                dataset_label: datasetInfo.datasets?.[datasetSel.value]?.label || '',
+                unit: datasetInfo.datasets?.[datasetSel.value]?.unit || '元',
+                channel: channelSel.value,
+                channel_name: channelSel.selectedOptions[0]?.text || channelSel.value,
+                series: seriesSel.value,
+                series_name: seriesSel.selectedOptions[0]?.text || seriesSel.value,
+                config: {
+                    training_months: parseInt(document.getElementById('training-months').value),
+                    forecast_months: parseInt(document.getElementById('forecast-months').value),
+                    rolling_rounds: parseInt(document.getElementById('rolling-rounds').value)
+                },
+                methods,
+                data_end: datasetInfo.data_end
             };
-            
-            showLoading(true);
-            
-            try {
-                const response = await fetch('/api/backtest/run', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ dataset: document.getElementById('dataset-select').value, channel, series, method, params, backtest_config: backtestConfig })
-                });
-                
-                const result = await response.json();
-                
-                if (result.error) {
-                    alert(result.error);
-                } else {
-                    displayResults(result);
+        }
+
+        function querySignature(q) {
+            return BV.signature([q.kind, q.dataset, q.channel, q.series, q.config, q.methods, q.data_end]);
+        }
+
+        function showBanner(html, recompute) {
+            const el = document.getElementById('result-banner');
+            el.className = 'rounded-lg px-4 py-3 text-sm flex flex-wrap items-center justify-between gap-2 ' +
+                (recompute ? 'bg-amber-50 text-amber-800' : 'bg-green-50 text-green-800');
+            el.innerHTML = `<span>${html}</span>` +
+                (recompute ? '<button class="px-3 py-1 rounded bg-white border border-amber-300 hover:bg-amber-100">重新計算</button>' : '');
+            el.querySelector('button')?.addEventListener('click', recompute);
+            el.classList.remove('hidden');
+        }
+
+        /** 先找現成紀錄（我的紀錄 → 共用回測總表），沒有才呼叫 compute() 計算並存成紀錄 */
+        async function runWithRecords(query, compute, force = false) {
+            const sig = querySignature(query);
+            if (!force) {
+                const mine = await BV.Records.find(sig);
+                if (mine) {
+                    showRecord(mine);
+                    showBanner(`這是 ${BV.esc(mine.created_at)} 跑過的結果（我的紀錄），不必重跑。`, () => runWithRecords(query, compute, true));
+                    return;
                 }
+                if (query.kind === 'compare' && query.methods === 'default') {
+                    const hit = await BV.findShared(query.dataset, query.channel, query.series, query.config, query.data_end);
+                    if (hit) {
+                        showRecord({ ...query, signature: sig, backtest_period: hit.entry.backtest_period, results: hit.entry.results, source: 'shared' });
+                        showBanner(`這是共用回測總表的結果（資料更新於 ${BV.esc(hit.shared.data_updated)}），不必重跑。部分方法的逐輪明細點選時才計算。`,
+                                   () => runWithRecords(query, compute, true));
+                        return;
+                    }
+                }
+            }
+            showLoading(true);
+            try {
+                const out = await compute();
+                if (!out) return;
+                const record = { ...query, signature: sig, ...out };
+                showRecord(record);
+                const saved = await BV.Records.save(record);
+                showBanner(saved ? '已完成並存到「回測紀錄」，下次同樣的查詢會直接顯示。' : '已完成（瀏覽器無法儲存，未存入紀錄）。');
             } catch (e) {
                 console.error('回測失敗:', e);
                 alert('回測執行失敗');
@@ -1185,249 +1089,70 @@
             }
         }
 
-        // 比較全部方法
-        async function compareMethods() {
-            const channel = document.getElementById('channel-select').value;
-            const series = document.getElementById('series-select').value;
-            const backtestConfig = {
-                training_months: parseInt(document.getElementById('training-months').value),
-                forecast_months: parseInt(document.getElementById('forecast-months').value),
-                rolling_rounds: parseInt(document.getElementById('rolling-rounds').value)
-            };
-            
-            const methods = [
-                { method: 'Naive', params: {} },
-                { method: 'Seasonal_Naive', params: { seasonal_period: 12 } },
-                { method: 'SMA', params: { window: 3 } },
-                { method: 'SMA', params: { window: 6 } },
-                { method: 'SMA', params: { window: 12 } },
-                { method: 'SES', params: { alpha: 0.2 } },
-                { method: 'SES', params: { alpha: 0.3 } },
-                { method: 'Holt', params: { alpha: 0.2, beta: 0.1 } },
-                { method: 'HoltWinters', params: { alpha: 0.2, beta: 0.1, gamma: 0.2, seasonal_periods: 12, seasonal_type: 'add' } },
-                { method: 'HoltWinters', params: { alpha: 0.2, beta: 0.1, gamma: 0.2, seasonal_periods: 12, seasonal_type: 'mul' } },
-                { method: 'WeightedMA', params: { ma_period_1: 12, ma_period_2: 6, ma_period_3: 3, sell_in_weight: 0.7, sell_out_weight: 0.3, use_sell_in_as_sell_out: true } }
-            ];
-            
-            showLoading(true);
-            
-            try {
-                const response = await fetch('/api/backtest/compare', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ dataset: document.getElementById('dataset-select').value, channel, series, methods, backtest_config: backtestConfig })
-                });
-                
-                const result = await response.json();
-                if (result.error) {
-                    alert(result.error);
-                } else {
-                    displayComparison(result);
-                }
-            } catch (e) {
-                console.error('比較失敗:', e);
-                alert('方法比較失敗');
-            } finally {
-                showLoading(false);
-            }
-        }
-
-        // 取得數值評估等級
-        function getMetricRating(metric, value) {
-            const ratings = {
-                wmape: [
-                    { max: 0.10, text: '優秀', color: 'text-green-600' },
-                    { max: 0.20, text: '良好', color: 'text-yellow-600' },
-                    { max: 0.30, text: '可接受', color: 'text-orange-600' },
-                    { max: Infinity, text: '需改善', color: 'text-red-600' }
-                ],
-                mape: [
-                    { max: 0.10, text: '高準確度', color: 'text-green-600' },
-                    { max: 0.20, text: '良好預測', color: 'text-yellow-600' },
-                    { max: 0.50, text: '合理預測', color: 'text-orange-600' },
-                    { max: Infinity, text: '不準確', color: 'text-red-600' }
-                ],
-                bias: [
-                    { max: 0.05, text: '無明顯偏差', color: 'text-green-600' },
-                    { max: 0.15, text: '輕微偏差', color: 'text-yellow-600' },
-                    { max: Infinity, text: '系統性偏差', color: 'text-red-600' }
-                ],
-                acc10: [
-                    { min: 0.70, text: '優秀', color: 'text-green-600' },
-                    { min: 0.50, text: '良好', color: 'text-yellow-600' },
-                    { min: 0.30, text: '可接受', color: 'text-orange-600' },
-                    { min: 0, text: '需改善', color: 'text-red-600' }
-                ],
-                acc20: [
-                    { min: 0.80, text: '優秀', color: 'text-green-600' },
-                    { min: 0.60, text: '良好', color: 'text-yellow-600' },
-                    { min: 0.40, text: '可接受', color: 'text-orange-600' },
-                    { min: 0, text: '需改善', color: 'text-red-600' }
-                ]
-            };
-            
-            const rules = ratings[metric];
-            if (!rules) return { text: '-', color: 'text-gray-500' };
-            
-            const absValue = Math.abs(value);
-            
-            if (metric === 'acc10' || metric === 'acc20') {
-                for (const rule of rules) {
-                    if (value >= rule.min) return rule;
-                }
-            } else {
-                for (const rule of rules) {
-                    if (absValue < rule.max) return rule;
-                }
-            }
-            
-            return { text: '-', color: 'text-gray-500' };
-        }
-
-        // 顯示結果
-        function displayResults(result) {
-            // 顯示指標
-            document.getElementById('results-metrics').classList.remove('hidden');
-            const periodEl = document.getElementById('backtest-period');
-            periodEl.textContent = `回測期間：${result.backtest_period}（共 ${result.round_details.length} 輪 × 每輪預測 ${result.round_details[0]?.actuals.length ?? 0} 個月）`;
-            periodEl.classList.remove('hidden');
-            
-            const wmape = result.overall.wmape;
-            const mape = result.overall.mape;
-            const bias = result.overall.bias;
-            const acc10 = result.overall.acc_10;
-            const acc20 = result.overall.acc_20;
-            
-            document.getElementById('metric-wmape').textContent = (wmape * 100).toFixed(1) + '%';
-            document.getElementById('metric-mape').textContent = (mape * 100).toFixed(1) + '%';
-            document.getElementById('metric-bias').textContent = (bias * 100).toFixed(1) + '%';
-            document.getElementById('metric-rmse').textContent = result.overall.rmse.toFixed(0);
-            document.getElementById('metric-acc10').textContent = (acc10 * 100).toFixed(1) + '%';
-            document.getElementById('metric-acc20').textContent = (acc20 * 100).toFixed(1) + '%';
-            
-            // 顯示評估提示
-            const wmapeRating = getMetricRating('wmape', wmape);
-            const mapeRating = getMetricRating('mape', mape);
-            const biasRating = getMetricRating('bias', bias);
-            const acc10Rating = getMetricRating('acc10', acc10);
-            const acc20Rating = getMetricRating('acc20', acc20);
-            
-            document.getElementById('metric-wmape-hint').innerHTML = `<span class="${wmapeRating.color}">${wmapeRating.text}</span>`;
-            document.getElementById('metric-mape-hint').innerHTML = `<span class="${mapeRating.color}">${mapeRating.text}</span>`;
-            document.getElementById('metric-bias-hint').innerHTML = `<span class="${biasRating.color}">${bias > 0 ? '預測偏高' : bias < 0 ? '預測偏低' : '無偏差'} - ${biasRating.text}</span>`;
-            document.getElementById('metric-rmse-hint').innerHTML = `<span class="text-gray-500">平均誤差量</span>`;
-            document.getElementById('metric-acc10-hint').innerHTML = `<span class="${acc10Rating.color}">${acc10Rating.text}</span>`;
-            document.getElementById('metric-acc20-hint').innerHTML = `<span class="${acc20Rating.color}">${acc20Rating.text}</span>`;
-            
-            // 更新圖表
-            updateChart(result.all_actuals, result.all_forecasts);
-            
-            // 顯示輪次明細
-            displayRoundDetails(result.round_details);
-            
-            // 隱藏比較表
-            document.getElementById('comparison-table').classList.add('hidden');
-        }
-
-        // 顯示比較結果
-        function displayComparison(result) {
-            const tbody = document.getElementById('comparison-tbody');
-            tbody.innerHTML = result.results.map((r, i) => {
-                const methodName = getMethodDisplayName(r.method, r.params);
-                const rowClass = i === 0 ? 'bg-green-50' : '';
-                return `
-                    <tr class="${rowClass} border-b hover:bg-gray-50">
-                        <td class="px-4 py-3 font-medium">${i + 1}</td>
-                        <td class="px-4 py-3">${methodName}</td>
-                        <td class="px-4 py-3 text-right font-semibold ${i === 0 ? 'text-green-600' : ''}">${(r.overall.wmape * 100).toFixed(1)}%</td>
-                        <td class="px-4 py-3 text-right">${(r.overall.mape * 100).toFixed(1)}%</td>
-                        <td class="px-4 py-3 text-right">${(r.overall.bias * 100).toFixed(1)}%</td>
-                        <td class="px-4 py-3 text-right">${(r.overall.acc_20 * 100).toFixed(1)}%</td>
-                    </tr>
-                `;
-            }).join('');
-            
-            document.getElementById('comparison-table').classList.remove('hidden');
-            document.getElementById('round-details').classList.add('hidden');
-        }
-
-        // 取得方法顯示名稱
-        function getMethodDisplayName(method, params) {
-            if (method === 'SMA') return `SMA-${params.window}`;
-            if (method === 'SES') return `SES(α=${params.alpha})`;
-            if (method === 'Holt') return `Holt(α=${params.alpha},β=${params.beta})`;
-            if (method === 'HoltWinters') return `HW-${params.seasonal_type === 'add' ? 'Add' : 'Mul'}`;
-            return method;
-        }
-
-        // 顯示輪次明細
-        function displayRoundDetails(rounds) {
-            const tbody = document.getElementById('round-tbody');
-            tbody.innerHTML = rounds.map(r => `
-                <tr class="border-b hover:bg-gray-50">
-                    <td class="px-3 py-2">${r.round}</td>
-                    <td class="px-3 py-2">${r.train_end}</td>
-                    <td class="px-3 py-2">${r.test_period}</td>
-                    <td class="px-3 py-2 text-right">${(r.wmape * 100).toFixed(1)}%</td>
-                    <td class="px-3 py-2 text-right">${(r.bias * 100).toFixed(1)}%</td>
-                </tr>
-            `).join('');
-            
-            document.getElementById('round-details').classList.remove('hidden');
-        }
-
-        // 更新圖表
-        function updateChart(actuals, forecasts) {
-            const ctx = document.getElementById('forecast-chart').getContext('2d');
-            
-            if (forecastChart) {
-                forecastChart.destroy();
-            }
-            
-            const labels = actuals.map((_, i) => `期${i + 1}`);
-            
-            forecastChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [
-                        {
-                            label: '實際值',
-                            data: actuals,
-                            borderColor: '#6366f1',
-                            backgroundColor: 'rgba(99, 102, 241, 0.1)',
-                            fill: true,
-                            tension: 0.3
-                        },
-                        {
-                            label: '預測值',
-                            data: forecasts,
-                            borderColor: '#ec4899',
-                            backgroundColor: 'rgba(236, 72, 153, 0.1)',
-                            borderDash: [5, 5],
-                            fill: false,
-                            tension: 0.3
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'top'
-                        }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: {
-                                callback: value => value.toLocaleString()
-                            }
-                        }
-                    }
-                }
+        async function postJSON(url, body) {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
             });
+            return response.json();
+        }
+
+        function requestBody(q, extra) {
+            return { dataset: q.dataset, channel: q.channel, series: q.series, backtest_config: q.config, ...extra };
+        }
+
+        async function computeCompare(q, methods) {
+            const result = await postJSON('/api/backtest/compare', requestBody(q, { methods }));
+            if (result.error) { alert(result.error); return null; }
+            return {
+                backtest_period: result.results[0].backtest_period,
+                results: result.results.map(BV.compact),
+                skipped: result.skipped || []
+            };
+        }
+
+        /** 顯示一筆紀錄：多種方法 → 排名 + 最準方法明細；單一方法 → 明細 */
+        function showRecord(record) {
+            document.getElementById('empty-hint').classList.add('hidden');
+            const results = record.results;
+            const pool = results.length > 1 ? results : (record.reference || []);
+            const formula = results.find(r => r.method === BV.FORMULA) || pool.find(r => r.method === BV.FORMULA);
+            const target = [record.channel_name || record.channel, record.series_name || record.series]
+                .filter(x => x && x !== 'ALL').join(' / ') || '全部';
+            const ctx = {
+                unit: record.unit, config: record.config, results: pool, best: pool[0], formula,
+                period: record.backtest_period?.replace(/(\d{4}-\d{2})-01/g, '$1').replace(' ~ ', '～'),
+                skipped: record.skipped,
+                subtitle: `${record.dataset_label || ''}｜${target}`
+            };
+            currentView = { record, ctx };
+            const ranking = document.getElementById('ranking-panel');
+            if (results.length > 1) {
+                BV.renderRanking(ranking, results, ctx, r => showDetail(r));
+                ranking.classList.remove('hidden');
+            } else {
+                ranking.classList.add('hidden');
+            }
+            showDetail(results[0]);
+        }
+
+        async function showDetail(r) {
+            const { record, ctx } = currentView;
+            if (!r.rounds) {
+                // 共用回測總表只存最準方法與需求計劃公式的逐輪明細，其他方法點選時再算
+                showLoading(true);
+                try {
+                    const res = await postJSON('/api/backtest/run', requestBody(record, { method: r.method, params: r.params }));
+                    if (res.error) { alert(res.error); return; }
+                    r.rounds = BV.compact(res).rounds;
+                } finally {
+                    showLoading(false);
+                }
+            }
+            const panel = document.getElementById('detail-panel');
+            BV.renderDetail(panel, r, ctx);
+            panel.classList.remove('hidden');
         }
 
         // 顯示/隱藏 Loading

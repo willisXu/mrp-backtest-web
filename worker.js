@@ -45,6 +45,7 @@ import os, sys
 sys.path.insert(0, "/app")
 os.environ["DATA_FILE"] = "/app/sales_agg.csv"
 os.environ["SELLOUT_FILE"] = "/app/sellout.csv"  # 不存在時 Sell-out 選項顯示找不到資料檔
+os.environ["RECORDS_FILE"] = "/app/backtest_records.json"  # 共用回測總表
 from web_app import app
 _client = app.test_client()
 

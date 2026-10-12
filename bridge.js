@@ -2,6 +2,8 @@
  * 網頁版橋接：輸入密碼解密 data.enc（PBKDF2-SHA256 → AES-256-GCM，gzip JSON：{檔名: CSV}），
  * 交給 worker.js 在背景執行緒以 Pyodide 執行原本的 web_app.py，
  * 頁面上的 fetch('/api/...') 改由它回應。data.enc 由 site/publish.py 產生。
+ * 另提供 window.mrpSecureStore：回測紀錄以登入密碼衍生的金鑰加密後存在 localStorage，
+ * 關掉分頁後仍保留，但沒有密碼讀不到內容；換密碼後舊紀錄自動失效。
  */
 (() => {
   const PW_KEY = "mrp_backtest_pw";
@@ -59,6 +61,51 @@
 
   // ---------- 解密 ----------
   const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+  function toB64(buf) {
+    const bytes = new Uint8Array(buf);
+    let s = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); // 分段避免參數過多
+    return btoa(s);
+  }
+
+  // ---------- 回測紀錄加密儲存 ----------
+  const REC_PREFIX = "mrp_rec_";
+  const local = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { localStorage.setItem(k, v); },
+  };
+  let resolveRecKey;
+  const recKey = new Promise((res) => { resolveRecKey = res; });
+
+  async function deriveRecordKey(password) {
+    let salt = local.get(REC_PREFIX + "salt");
+    if (!salt) {
+      salt = toB64(crypto.getRandomValues(new Uint8Array(16)));
+      try { local.set(REC_PREFIX + "salt", salt); } catch { /* 無法儲存時本次仍可使用 */ }
+    }
+    const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveKey"]);
+    return crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt: b64(salt), iterations: 100000 },
+      base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+  }
+
+  window.mrpSecureStore = {
+    async get(name) {
+      const raw = local.get(REC_PREFIX + name);
+      if (!raw) return null;
+      try {
+        const { iv, ct } = JSON.parse(raw);
+        const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(iv) }, await recKey, b64(ct));
+        return new TextDecoder().decode(pt);
+      } catch {
+        return null; // 密碼已更換或資料損毀：視為沒有紀錄
+      }
+    },
+    async set(name, text) {
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await recKey, new TextEncoder().encode(text));
+      local.set(REC_PREFIX + name, JSON.stringify({ iv: toB64(iv), ct: toB64(ct) })); // 空間不足時丟出錯誤，由呼叫端處理
+    },
+  };
 
   async function decrypt(enc, password) {
     const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveKey"]);
@@ -137,6 +184,7 @@
         return;
       }
       store.set(PW_KEY, password);
+      deriveRecordKey(password).then(resolveRecKey);
       onStatus = (t) => { status.textContent = t; };
       onStatus(lastStatus || "載入計算引擎…");
       try {

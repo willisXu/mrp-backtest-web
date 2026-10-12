@@ -148,6 +148,54 @@ FORMULA_TEXT = {
 for _key, (_formula, _desc, _suitable) in FORMULA_TEXT.items():
     FORMULA_INFO[_key].update({"formula": _formula, "description": _desc, "suitable_for": _suitable})
 
+FORMULA_LABEL = "需求計劃公式（現行）"
+DEFAULT_FORMULA_PARAMS = {"ma_period_1": 12, "ma_period_2": 6, "ma_period_3": 3,
+                          "sell_in_weight": 0.7, "sell_out_weight": 0.3, "use_sell_in_as_sell_out": True}
+
+
+def method_label(method: str, params: dict[str, Any] | None = None) -> str:
+    """方法的中文顯示名稱，回測頁、需求計劃頁與回測紀錄共用。"""
+    params = params or {}
+    if method == "Naive":
+        return "Naive（上月）"
+    if method == "Seasonal_Naive":
+        return "Seasonal Naive（去年同期）"
+    if method == "SMA":
+        return f"SMA-{params.get('window', 3):g}"
+    if method == "SES":
+        return f"SES（α={params.get('alpha', 0.2):g}）"
+    if method == "Holt":
+        return f"Holt（α={params.get('alpha', 0.2):g}, β={params.get('beta', 0.1):g}）"
+    if method == "HoltWinters":
+        return "Holt-Winters（乘法）" if params.get("seasonal_type") == "mul" else "Holt-Winters（加法）"
+    if method == "WeightedMA":
+        periods = [params.get(f"ma_period_{i}", DEFAULT_FORMULA_PARAMS[f"ma_period_{i}"]) for i in (1, 2, 3)]
+        weight = params.get("sell_in_weight", 0.7)
+        if periods != [12, 6, 3] or weight != 0.7:
+            return f"需求計劃公式（MA {'/'.join(f'{p:g}' for p in periods)}，Sell-in {weight:g}）"
+        return FORMULA_LABEL
+    return method
+
+
+# 「快速比較」與共用回測紀錄使用的方法組合
+DEFAULT_COMPARE_METHODS = [
+    {"method": "WeightedMA", "params": dict(DEFAULT_FORMULA_PARAMS)},
+    {"method": "Naive", "params": {}},
+    {"method": "Seasonal_Naive", "params": {"seasonal_period": 12}},
+    {"method": "SMA", "params": {"window": 3}},
+    {"method": "SMA", "params": {"window": 6}},
+    {"method": "SMA", "params": {"window": 12}},
+    {"method": "SES", "params": {"alpha": 0.2}},
+    {"method": "SES", "params": {"alpha": 0.3}},
+    {"method": "Holt", "params": {"alpha": 0.2, "beta": 0.1}},
+    {"method": "HoltWinters", "params": {"alpha": 0.2, "beta": 0.1, "gamma": 0.2, "seasonal_periods": 12, "seasonal_type": "add"}},
+    {"method": "HoltWinters", "params": {"alpha": 0.2, "beta": 0.1, "gamma": 0.2, "seasonal_periods": 12, "seasonal_type": "mul"}},
+]
+
+# 共用回測紀錄（build_backtest_records.py 產生；網頁版由 publish.py 一併加密）
+RECORDS_FILE = Path(os.environ.get("RECORDS_FILE", BASE_DIR / "output" / "backtest_records.json"))
+
+
 @dataclass
 class StandardColumns:
     date: str = "date"
@@ -428,6 +476,7 @@ def run_backtest(
                 "round": round_idx + 1,
                 "train_end": str(ts.index[train_end - 1].date()),
                 "test_period": f"{ts.index[test_start].date()} ~ {ts.index[test_end - 1].date()}",
+                "months": [d.strftime("%Y-%m") for d in ts.index[test_start:test_end]],
                 "actuals": [float(x) for x in actuals],
                 "forecasts": [float(x) for x in predictions],
                 "mape": mape,
@@ -496,6 +545,11 @@ def index():
 @app.route("/demand-planning")
 def demand_planning_page():
     return render_template("demand_planning.html")
+
+
+@app.route("/records")
+def records_page():
+    return render_template("records.html")
 
 
 @app.route("/api/data/info")
@@ -584,6 +638,7 @@ def run_backtest_api():
             "series": series,
             "method": method,
             "params": params,
+            "label": method_label(method, params),
             "data_length": int(len(ts)),
             "data_range": f"{ts.index.min().date()} ~ {ts.index.max().date()}",
         }
@@ -600,7 +655,7 @@ def compare_methods_api():
 
     channel = payload.get("channel", "ALL")
     series = payload.get("series", "ALL")
-    methods_config = payload.get("methods", [])
+    methods_config = payload.get("methods") or DEFAULT_COMPARE_METHODS
     backtest_config = payload.get("backtest_config", {})
 
     ts = get_channel_time_series(df, channel, series)
@@ -618,7 +673,7 @@ def compare_methods_api():
             forecast_months=backtest_config.get("forecast_months", 3),
             rolling_rounds=backtest_config.get("rolling_rounds", 12),
         )
-        result.update({"method": method, "params": params})
+        result.update({"method": method, "params": params, "label": method_label(method, params)})
         results.append(result)
 
     ranking = sorted(
@@ -627,7 +682,8 @@ def compare_methods_api():
     )
     if not ranking:
         return jsonify({"error": next((item["error"] for item in results if "error" in item), "沒有可比較的結果")}), 400
-    return jsonify({"results": ranking, "ranking": ranking})
+    return jsonify({"results": ranking, "ranking": ranking,
+                    "skipped": [{"label": item["label"], "error": item["error"]} for item in results if "error" in item]})
 
 
 @app.route("/api/demand-planning/calculate", methods=["POST"])
@@ -706,7 +762,7 @@ def _serialize_demand_result(result) -> dict[str, Any]:
 
 # 需求計劃可選用的預測方法（key → 顯示名稱、方法、參數）
 FORECAST_CHOICES = {
-    "WeightedMA": ("現行公式（MA 加權）", "WeightedMA", {}),
+    "WeightedMA": (FORMULA_LABEL, "WeightedMA", {}),
     "Seasonal_Naive": ("Seasonal Naive（去年同期）", "Seasonal_Naive", {"seasonal_period": 12}),
     "HW-add": ("Holt-Winters（加法）", "HoltWinters", {"seasonal_type": "add"}),
     "HW-mul": ("Holt-Winters（乘法）", "HoltWinters", {"seasonal_type": "mul"}),
@@ -720,15 +776,35 @@ PLAN_TRAINING_MONTHS = 24  # 與回測預設相同
 PLAN_FORECAST_MONTHS = 3   # 對應製程週期
 
 
-def _rank_forecast_choices(ts: pd.Series) -> list[dict[str, Any]]:
-    """以預設回測設定（訓練 24／預測 3／12 輪）比較各方法，依 wMAPE 由低到高排序。"""
-    ranking = []
+def _backtest_forecast_choices(ts: pd.Series, formula_params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """以預設回測設定（訓練 24／預測 3／12 輪）回測各方法，依 wMAPE 由低到高排序，保留完整結果。
+    需求計劃公式使用頁面上設定的 MA 期數與權重。"""
+    results = []
     for key, (label, method, params) in FORECAST_CHOICES.items():
+        if key == "WeightedMA":
+            params = {**DEFAULT_FORMULA_PARAMS, **(formula_params or {})}
+            label = method_label(method, params)
         result = run_backtest(ts, create_forecaster(method, params))
         if "overall" in result:
-            ranking.append({"key": key, "label": label, "wmape": result["overall"]["wmape"],
-                            "bias": result["overall"]["bias"]})
-    return sorted(ranking, key=lambda item: item["wmape"])
+            results.append({**result, "key": key, "label": label, "method": method, "params": params})
+    return sorted(results, key=lambda item: item["overall"]["wmape"])
+
+
+def _rank_forecast_choices(ts: pd.Series, formula_params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    return [{"key": r["key"], "label": r["label"], "wmape": r["overall"]["wmape"], "bias": r["overall"]["bias"]}
+            for r in _backtest_forecast_choices(ts, formula_params)]
+
+
+def _formula_params_from(payload: dict[str, Any]) -> dict[str, Any]:
+    """需求計劃頁送來的 MA 期數、權重 → WeightedMA 參數。"""
+    ma = payload.get("ma_periods", {})
+    config = payload.get("config", {})
+    weight = config.get("sell_in_weight", DEFAULT_FORMULA_PARAMS["sell_in_weight"])
+    return {
+        "ma_period_1": ma.get("period_1", 12), "ma_period_2": ma.get("period_2", 6), "ma_period_3": ma.get("period_3", 3),
+        "sell_in_weight": weight, "sell_out_weight": config.get("sell_out_weight", 1 - weight),
+        "use_sell_in_as_sell_out": payload.get("use_sell_in_as_sell_out", True),
+    }
 
 
 def _forecast_monthly_average(ts: pd.Series, key: str) -> dict[str, Any]:
@@ -783,7 +859,7 @@ def calculate_demand_planning_from_data():
         order_lead_days=config_data.get("order_lead_days", 60),
     )
     # 預估月均銷的方法：現行公式（預設）、自動（回測最準）或指定方法
-    ranking = _rank_forecast_choices(ts)
+    ranking = _rank_forecast_choices(ts, _formula_params_from(payload))
     requested = payload.get("forecast_method", "WeightedMA")
     if requested == "auto":
         chosen = ranking[0]["key"] if ranking else "WeightedMA"
@@ -833,6 +909,31 @@ def calculate_demand_planning_from_data():
         "sell_out_ma3": sell_out_ma3,
     }
     return jsonify(response)
+
+
+@app.route("/api/demand-planning/backtest", methods=["POST"])
+def backtest_demand_planning():
+    """回測需求計劃頁的預估月均銷公式（使用頁面上的 MA 與權重），並與其他方法比較。"""
+    payload = request.get_json(silent=True) or {}
+    df = load_data()
+    if df is None:
+        return jsonify({"error": "找不到資料檔"}), 500
+    channel = payload.get("channel") or "ALL"
+    ts = get_channel_time_series(df, channel, payload.get("series", "ALL"))
+    if len(ts) == 0:
+        return jsonify({"error": "該通路沒有資料"}), 400
+    results = _backtest_forecast_choices(ts, _formula_params_from(payload))
+    if not results:
+        min_required = PLAN_TRAINING_MONTHS + PLAN_FORECAST_MONTHS + 12 - 1
+        return jsonify({"error": f"「{channel}」資料只有 {len(ts)} 個月，回測至少需要 {min_required} 個月"}), 400
+    return jsonify({"channel": channel, "results": results, "data_end": ts.index[-1].strftime("%Y-%m")})
+
+
+@app.route("/api/records/shared")
+def get_shared_records():
+    if not RECORDS_FILE.exists():
+        return jsonify({"error": "尚未產生共用回測紀錄（執行 python build_backtest_records.py）"}), 404
+    return app.response_class(RECORDS_FILE.read_text(encoding="utf-8"), mimetype="application/json")
 
 
 @app.route("/api/demand-planning/config")
