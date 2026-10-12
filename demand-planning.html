@@ -1,13 +1,14 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <script src="bridge.js?v=397189af83"></script>
+    <script src="bridge.js?v=f0611ef23c"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>需求計劃系統 - 生產公式計算</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <script src="static/backtest_view.js?v=397189af83"></script>
+    <script src="static/method_docs.js?v=f0611ef23c"></script>
+    <script src="static/backtest_view.js?v=f0611ef23c"></script>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Noto Sans TC', sans-serif; }
@@ -85,8 +86,27 @@
                         公式參數設定
                     </h2>
                     
-                    <!-- 通路選擇 -->
+                    <!-- 計算對象 -->
                     <div class="mb-6">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">計算對象</label>
+                        <select id="target-select" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <option value="sku">料號（Sell-in／Sell-out 數量，個）— 與需求計劃表相同</option>
+                            <option value="sellin">通路（Sell-in 金額，元）</option>
+                        </select>
+                    </div>
+
+                    <!-- 料號選擇 -->
+                    <div id="sku-box" class="mb-6">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">選擇料號 <span class="text-gray-400 font-normal">（依近 12 個月 Sell-in 數量排序）</span></label>
+                        <input id="sku-search" type="search" placeholder="輸入料號、規格或品名篩選" class="w-full px-3 py-2 mb-2 border border-gray-300 rounded-lg">
+                        <select id="sku-select" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <option value="">載入中...</option>
+                        </select>
+                        <div id="sku-stock" class="mt-3 text-sm bg-orange-50 rounded-lg p-3 hidden"></div>
+                    </div>
+
+                    <!-- 通路選擇 -->
+                    <div id="channel-box" class="mb-6 hidden">
                         <label class="block text-sm font-medium text-gray-700 mb-2">選擇通路</label>
                         <select id="channel-select" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                             <option value="">載入中...</option>
@@ -98,7 +118,7 @@
                         <label class="block text-sm font-medium text-gray-700 mb-2">預估月均銷方法</label>
                         <select id="forecast-method" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                             <option value="WeightedMA">需求計劃公式（現行 MA 加權）</option>
-                            <option value="auto">自動：採用此通路回測最準的方法</option>
+                            <option value="auto">自動：採用此對象回測最準的方法</option>
                         </select>
                         <p class="text-xs text-gray-400 mt-1">現行公式以外的方法：用最近 24 個月預測未來 3 個月，取平均作為月均銷；下方 MA 與權重設定只影響現行公式</p>
                     </div>
@@ -158,6 +178,7 @@
                                        class="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500">
                                 <label for="use_sell_in_as_sell_out" class="ml-3 text-sm font-medium text-gray-700">
                                     無 Sell-out 數據時，用 Sell-in 替代
+                                    <span class="block text-xs text-gray-400 font-normal">料號模式使用存貨表的實際 Sell-out；通路模式沒有 Sell-out</span>
                                 </label>
                             </div>
                         </div>
@@ -207,12 +228,12 @@
                     <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
                         <div class="input-group transition-transform">
                             <label class="block text-sm text-gray-600 mb-1">總倉庫存 (R)</label>
-                            <input type="number" id="warehouse_stock" value="13800" 
+                            <input type="number" id="warehouse_stock" value="19002" 
                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
                         </div>
                         <div class="input-group transition-transform">
                             <label class="block text-sm text-gray-600 mb-1">再製中 (P)</label>
-                            <input type="number" id="in_production" value="19002" 
+                            <input type="number" id="in_production" value="13800" 
                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
                         </div>
                         <div class="input-group transition-transform">
@@ -307,12 +328,18 @@
                         <svg class="w-5 h-5 mr-2 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                         </svg>
-                        計算結果
+                        計算結果 <span id="unit-note" class="ml-2 text-sm font-normal text-gray-500"></span>
                     </h2>
                     
                     <div class="space-y-4">
                         <!-- 預測方法 -->
                         <div id="forecast-method-info" class="bg-indigo-50 rounded-lg p-4 text-sm hidden"></div>
+
+                        <!-- 計算說明：本次數字怎麼算出來 -->
+                        <details id="calc-explain" class="bg-yellow-50 rounded-lg p-4 text-sm hidden" open>
+                            <summary class="cursor-pointer font-medium text-yellow-800">計算說明（這次的數字怎麼來）</summary>
+                            <ol id="calc-explain-list" class="list-decimal pl-5 mt-2 space-y-1 text-gray-700"></ol>
+                        </details>
 
                         <!-- 銷售分析 -->
                         <div class="bg-blue-50 rounded-lg p-4">
@@ -403,21 +430,111 @@
         // 初始化
         document.addEventListener('DOMContentLoaded', () => {
             loadChannels();
+            loadSkuList();
             loadForecastChoices();
+            document.getElementById('target-select').addEventListener('change', onTargetChange);
+            document.getElementById('sku-search').addEventListener('input', renderSkuOptions);
+            document.getElementById('sku-select').addEventListener('change', showSkuStock);
             setupSliders();
             document.getElementById('calculate-btn').addEventListener('click', calculate);
             document.getElementById('backtest-btn').addEventListener('click', () => runFormulaBacktest(false));
             document.getElementById('dp-guide').innerHTML = BV.guideHTML();
+            // 各參數的說明放在滑桿下方
+            Object.entries(PLAN_PARAM_HELP).forEach(([id, text]) => {
+                document.getElementById(id)?.insertAdjacentHTML('afterend', `<p class="text-xs text-gray-400 mt-1">${text}</p>`);
+            });
         });
 
         let dataInfo = {};
         let dpView = null;
 
+        // ---------- 計算對象：料號（數量）或通路（金額） ----------
+        let skuItems = [];
+        let skuDataEnd = null;
+        const isSku = () => document.getElementById('target-select').value === 'sku';
+
+        function onTargetChange() {
+            document.getElementById('sku-box').classList.toggle('hidden', !isSku());
+            document.getElementById('channel-box').classList.toggle('hidden', isSku());
+        }
+
+        async function loadSkuList() {
+            try {
+                const response = await fetch('/api/demand-planning/sku-list');
+                const data = await response.json();
+                if (data.error) throw new Error(data.error);
+                skuItems = data.items;
+                skuDataEnd = data.data_end;
+                renderSkuOptions();
+            } catch (e) {
+                console.error('載入料號失敗:', e);
+                // 沒有料號數量資料時改用通路模式
+                document.getElementById('target-select').value = 'sellin';
+                document.querySelector('#target-select option[value=sku]').disabled = true;
+                onTargetChange();
+            }
+        }
+
+        function renderSkuOptions() {
+            const q = document.getElementById('sku-search').value.trim().toLowerCase();
+            const select = document.getElementById('sku-select');
+            const current = select.value;
+            const list = skuItems.filter(i => !q || i.name.toLowerCase().includes(q));
+            select.innerHTML = list.map(i => `<option value="${i.key}">${BV.esc(i.name)}</option>`).join('') ||
+                '<option value="">沒有符合的料號</option>';
+            if (list.some(i => i.key === current)) select.value = current;
+            showSkuStock();
+        }
+
+        function selectedSku() {
+            return skuItems.find(i => i.key === document.getElementById('sku-select').value);
+        }
+
+        // 存貨表上的庫存與表上的計算結果，供對照與帶入
+        function showSkuStock() {
+            const box = document.getElementById('sku-stock');
+            const st = selectedSku()?.stock;
+            if (!st) {
+                box.innerHTML = '此料號不在存貨表最新一期的再製表中，請手動輸入庫存。';
+                box.classList.remove('hidden');
+                return;
+            }
+            const n = v => Math.round(v).toLocaleString();
+            box.innerHTML = `
+                <div class="font-medium text-orange-800 mb-1">存貨表（${BV.esc(st.date)} 分頁）</div>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-gray-700">
+                    <div>總倉庫存：<b>${n(st.warehouse_stock)}</b></div><div>再製中：<b>${n(st.in_production)}</b></div>
+                    <div>MOMO 倉：${n(st.momo)}</div><div>BOXFUL（官網）：${n(st.boxful)}</div>
+                    <div>表上預估月均銷：${n(st.sheet_forecast)}</div><div>表上 ROP：${n(st.sheet_rop)}</div>
+                    <div>表上是否再製：${BV.esc(st.sheet_decision ?? '-')}</div><div>表上可用月數：${st.sheet_months.toFixed(1)}</div>
+                </div>
+                <div class="text-xs text-gray-500 mt-1">總倉庫存＝各效期區間加總；交期：${BV.esc(st.lead_time_note ?? '-')}</div>
+                <button id="fill-stock" class="mt-2 px-3 py-1 rounded bg-white border border-orange-300 text-orange-800 hover:bg-orange-100">帶入總倉庫存與再製中</button>`;
+            box.querySelector('#fill-stock').addEventListener('click', () => {
+                document.getElementById('warehouse_stock').value = Math.round(st.warehouse_stock);
+                document.getElementById('in_production').value = Math.round(st.in_production);
+            });
+            box.classList.remove('hidden');
+        }
+
+        function targetFields() {
+            if (isSku()) {
+                const sku = selectedSku();
+                return { dataset: 'sku', series: sku?.key || '', channel: 'ALL', name: sku?.name || '', unit: '個',
+                         data_end: skuDataEnd, label: 'Sell-in 數量（料號，需求計劃）' };
+            }
+            const ch = document.getElementById('channel-select').value;
+            return { dataset: 'sellin', series: 'ALL', channel: ch, name: ch === 'ALL' ? '全部通路' : ch, unit: '元',
+                     data_end: dataInfo.data_end, label: 'Sell-in 銷貨淨額（需求計劃）' };
+        }
+
         // 頁面上的公式設定（與「執行計算」相同）
         function formulaPayload() {
             const w = parseFloat(document.getElementById('sell_in_weight').value);
+            const t = targetFields();
             return {
-                channel: document.getElementById('channel-select').value,
+                dataset: t.dataset, series: t.series,
+                channel: t.channel,
                 config: { sell_in_weight: w, sell_out_weight: 1 - w },
                 ma_periods: {
                     period_1: parseInt(document.getElementById('ma_period_1').value),
@@ -441,16 +558,17 @@
         // 回測需求計劃公式：先找回測紀錄，沒有才計算
         async function runFormulaBacktest(force) {
             const payload = formulaPayload();
-            if (!payload.channel) { alert('請選擇通路'); return; }
+            const t = targetFields();
+            if (!payload.channel || (t.dataset === 'sku' && !payload.series)) { alert('請選擇計算對象'); return; }
             const query = {
-                kind: 'demand', dataset: 'sellin', dataset_label: 'Sell-in 銷貨淨額（需求計劃）', unit: '元',
-                channel: payload.channel, channel_name: payload.channel === 'ALL' ? '全部通路' : payload.channel,
-                series: 'ALL', series_name: '全部系列',
+                kind: 'demand', dataset: t.dataset, dataset_label: t.label, unit: t.unit,
+                channel: payload.channel, channel_name: t.dataset === 'sku' ? 'ALL' : t.name,
+                series: payload.series, series_name: t.dataset === 'sku' ? t.name : '全部系列',
                 config: { training_months: 24, forecast_months: 3, rolling_rounds: 12 },
                 formula_params: { ma: payload.ma_periods, weight: payload.config.sell_in_weight, sub: payload.use_sell_in_as_sell_out },
-                data_end: dataInfo.data_end, focus: BV.FORMULA
+                data_end: t.data_end, focus: BV.FORMULA
             };
-            const sig = BV.signature(['demand', query.channel, query.formula_params, query.data_end]);
+            const sig = BV.signature(['demand', query.dataset, query.channel, query.series, query.formula_params, query.data_end]);
             if (!force) {
                 const mine = await BV.Records.find(sig);
                 if (mine) {
@@ -487,7 +605,7 @@
             const ctx = {
                 unit: record.unit, config: record.config, results, best: results[0], formula,
                 period: record.backtest_period?.replace(/(\d{4}-\d{2})-01/g, '$1').replace(' ~ ', '～'),
-                subtitle: `${record.channel_name}｜預估月均銷（未來 3 個月都用同一個數字）`
+                subtitle: `${record.dataset === 'sku' ? record.series_name : record.channel_name}｜預估月均銷（未來 3 個月都用同一個數字）`
             };
             dpView = { record, ctx };
             BV.renderRanking(document.getElementById('dp-ranking'), results, ctx,
@@ -565,14 +683,16 @@
 
         // 執行計算
         async function calculate() {
-            const channel = document.getElementById('channel-select').value;
-            if (!channel) {
-                alert('請選擇通路');
+            const t = targetFields();
+            if (!t.channel || (t.dataset === 'sku' && !t.series)) {
+                alert('請選擇計算對象');
                 return;
             }
             
             const data = {
-                channel: channel,
+                dataset: t.dataset,
+                series: t.series,
+                channel: t.channel,
                 config: {
                     sell_in_weight: parseFloat(document.getElementById('sell_in_weight').value),
                     sell_out_weight: 1 - parseFloat(document.getElementById('sell_in_weight').value),
@@ -614,7 +734,10 @@
                 const result = await response.json();
                 
                 if (result.success) {
+                    document.getElementById('unit-note').textContent =
+                        `${t.name}｜單位：${t.unit}${result.target?.has_sell_out ? '｜Sell-out 使用實際數量' : ''}`;
                     displayCalculatedMA(result.calculated_ma);
+                    explainCalculation(result, data, t);
                     displayResults(result);
                     displayForecastMethod(result.forecast_method);
                 } else {
@@ -628,6 +751,35 @@
             }
         }
         
+        // 逐步說明本次的計算（公式與需求計劃表相同）
+        function explainCalculation(r, req, t) {
+            const n = v => Math.round(v).toLocaleString();
+            const u = t.unit === '個' ? ' 個' : ' 元';
+            const sa = r.sales_analysis, inv = req.inventory, cfg = req.config;
+            const est = sa.estimated_monthly_sales;
+            const fm = r.forecast_method;
+            const steps = [];
+            if (fm.key === 'WeightedMA') {
+                const so = r.target?.has_sell_out ? 'Sell-out 平均（實際數量）' : 'Sell-out 平均（以 Sell-in 代替）';
+                steps.push(`<b>預估月均銷 ${n(est)}${u}</b> = Sell-in 平均 ${n(sa.sell_in_avg)} × ${cfg.sell_in_weight} + ${so} ${n(sa.sell_out_avg)} × ${(1 - cfg.sell_in_weight).toFixed(2)}，四捨五入到百位。` +
+                    `各平均 = (MA-${req.ma_periods.period_1} + MA-${req.ma_periods.period_2} + MA-${req.ma_periods.period_3}) ÷ 3。`);
+            } else {
+                steps.push(`<b>預估月均銷 ${n(est)}${u}</b> = 「${BV.esc(fm.label)}」預測未來 3 個月（${fm.forecast.months.map(m => n(m.value)).join('、')}）的平均。`);
+            }
+            const lt = cfg.lead_time_months, ss = cfg.safety_stock_months;
+            steps.push(`<b>ROP ${n(r.inventory_demand.rop)}</b> = 月均銷 ${n(est)} × (前置時間 ${lt} + 安全庫存 ${ss} 個月)：庫存低於這個量就該再製。`);
+            steps.push(`<b>可用庫存 ${n(r.inventory_demand.available_stock)}</b> = 總倉庫存 ${n(inv.warehouse_stock)} + 再製中 ${n(inv.in_production)}。`);
+            steps.push(`<b>總需求 ${n(r.inventory_demand.total_demand)}</b> = ROP ${n(r.inventory_demand.rop)} + 組包 ${n(inv.combo_reserved)} + 深促 ${n(inv.promo_reserved)} + 行銷 ${n(inv.marketing_reserved)}。`);
+            const need = r.production_decision.need_production;
+            steps.push(`<b>是否再製：${need ? 'Y' : 'N'}</b>，因為可用庫存 ${n(r.inventory_demand.available_stock)} ${need ? '<' : '≥'} 總需求 ${n(r.inventory_demand.total_demand)}。`);
+            if (need) steps.push(`<b>建議再製量 ${n(r.production_decision.suggested_quantity)}</b> = 月均銷 ${n(est)} × 生產係數 ${cfg.production_coefficient}（約 ${cfg.production_coefficient} 個月的量）。`);
+            steps.push(`<b>現有可用 ${r.inventory_status.current_available_months.toFixed(1)} 個月</b> = 總倉庫存 ÷ 月均銷；銷完日 ${r.inventory_status.stock_depletion_date} = 今天 + 可用月數 × 30 天。`);
+            steps.push(`<b>計劃可用 ${r.inventory_status.planned_available_months.toFixed(1)} 個月</b> = (總倉 + 再製中 − 組包 − 深促 − 行銷) ÷ 月均銷；計劃銷完日 ${r.inventory_status.planned_depletion_date}。`);
+            if (r.order_info.order_deadline) steps.push(`<b>需求交期 ${r.order_info.order_deadline}</b> = 計劃銷完日往前 ${cfg.order_lead_days} 天，再製品最晚要在這天前入庫。`);
+            document.getElementById('calc-explain-list').innerHTML = steps.map(s => `<li>${s}</li>`).join('');
+            document.getElementById('calc-explain').classList.remove('hidden');
+        }
+
         // 顯示計算出的 MA 數值
         function displayCalculatedMA(ma) {
             const panel = document.getElementById('calculated-ma');
@@ -655,17 +807,17 @@
                 const current = fm.ranking.find(r => r.key === 'WeightedMA');
                 const rows = fm.ranking.slice(0, 3);
                 if (current && !rows.includes(current)) rows.push(current);
-                html += '<div class="text-gray-600">此通路回測 wMAPE（越低越準）：</div><ol class="mt-1 space-y-0.5">' +
+                html += '<div class="text-gray-600">此對象回測 wMAPE（越低越準）：</div><ol class="mt-1 space-y-0.5">' +
                     rows.map(r => {
                         const rank = fm.ranking.indexOf(r) + 1;
                         const mark = r.key === fm.key ? ' class="font-semibold text-indigo-700"' : '';
                         return `<li${mark}>${rank}. ${r.label}：${pct(r.wmape)}${r.key === fm.key ? '（使用中）' : ''}</li>`;
                     }).join('') + '</ol>';
                 if (fm.requested === 'WeightedMA' && fm.ranking[0].key !== 'WeightedMA') {
-                    html += `<div class="mt-2 text-amber-700">建議：此通路以「${fm.ranking[0].label}」回測最準，可改選「自動」。</div>`;
+                    html += `<div class="mt-2 text-amber-700">建議：此對象以「${fm.ranking[0].label}」回測最準，可改選「自動」。</div>`;
                 }
             } else {
-                html += '<div class="text-amber-700">此通路資料不足 38 個月，無法回測比較，使用現行公式。</div>';
+                html += '<div class="text-amber-700">此對象資料不足 38 個月，無法回測比較，使用現行公式。</div>';
             }
             if (fm.ranking.length) {
                 html += '<button onclick="runFormulaBacktest(false)" class="mt-2 text-indigo-700 underline">查看完整回測與說明 →</button>';

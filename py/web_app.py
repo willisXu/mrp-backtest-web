@@ -37,7 +37,8 @@ CORS(app)
 
 DATA_CACHE: dict[str, pd.DataFrame] = {}
 
-# 資料集：sellin＝通路×系列的銷貨淨額（元）；sellout＝通路×料號的銷貨數量（個）。
+# 資料集：sellin＝通路×系列的銷貨淨額（元）；sellout＝通路×料號的銷貨數量（個）；
+# sku＝料號的 Sell-in 數量（個，存貨可用月數表），另帶同料號的 Sell-out 數量供需求計劃公式使用。
 # 檔案可為 .xlsx 或彙總後的 .csv（網頁版由 site/publish.py 產生，以環境變數指定）
 DATASETS = {
     "sellin": {
@@ -50,9 +51,16 @@ DATASETS = {
         "columns": {"年月": "date", "通路": "channel", "料號": "series", "銷貨數量": "sales"},
         "label": "Sell-out 銷貨數量", "item_label": "料號", "unit": "個",
     },
+    "sku": {
+        "file": Path(os.environ.get("SKU_FILE", BASE_DIR / "SKU_數量_扁平化.xlsx")),
+        "columns": {"年月": "date", "料號": "series", "Sellin數量": "sales"},
+        "label": "Sell-in 數量（料號）", "item_label": "料號", "unit": "個",
+    },
 }
+# 料號庫存參考（存貨可用月數表最新一期）：xlsx 為「庫存參考」工作表；網頁版為獨立 CSV
+SKU_STOCK_FILE = Path(os.environ["SKU_STOCK_FILE"]) if os.environ.get("SKU_STOCK_FILE") else None
 DATA_SHEET = "銷售明細"
-SKU_LIST_SIZE = 150  # 料號選單只列近 12 個月銷量最高的前 N 個
+SKU_LIST_SIZE = 150  # Sell-out 料號選單只列近 12 個月銷量最高的前 N 個（sku 資料集列出全部）
 
 FORMULA_INFO = {
     "Naive": {"name": "Naive", "params": []},
@@ -136,17 +144,7 @@ FORMULA_INFO = {
 }
 
 
-FORMULA_TEXT = {
-    "Naive": ("預測值 = 上一期銷量", "直接以最近一期實際值作為預測", "穩定、無明顯趨勢的品項，或作為比較基準"),
-    "Seasonal_Naive": ("預測值 = 去年同期銷量", "以一個季節週期前的實際值作為預測", "季節性明顯、每年型態相近的品項"),
-    "SMA": ("預測值 = (過去 N 期銷量加總) / N", "對所有歷史數據權重相同，平滑短期波動", "需求平穩、波動不大的品項"),
-    "SES": ("預測值 = α × 本期實際 + (1 − α) × 本期預測", "近期資料權重較高，權重隨時間指數遞減", "無明顯趨勢與季節性的品項"),
-    "Holt": ("預測值 = 水準 + 趨勢 × 期數", "在指數平滑之外加入趨勢項", "有上升或下降趨勢的品項"),
-    "HoltWinters": ("預測值 = (水準 + 趨勢 × 期數) ± 季節因子", "同時考慮水準、趨勢與季節性", "有趨勢且有季節性的品項"),
-    "WeightedMA": ("預測值 = Sell-in 權重 × MA 組合 + Sell-out 權重 × MA 組合", "結合 12／6／3 期移動平均，並依 Sell-in／Sell-out 加權", "現行需求計劃公式"),
-}
-for _key, (_formula, _desc, _suitable) in FORMULA_TEXT.items():
-    FORMULA_INFO[_key].update({"formula": _formula, "description": _desc, "suitable_for": _suitable})
+# 各方法的說明（白話、公式、適合／注意、參數意義）在 static/method_docs.js
 
 FORMULA_LABEL = "需求計劃公式（現行）"
 DEFAULT_FORMULA_PARAMS = {"ma_period_1": 12, "ma_period_2": 6, "ma_period_3": 3,
@@ -349,13 +347,22 @@ def _standardize_dataframe(df: pd.DataFrame, rename_map: dict[str, str]) -> pd.D
         raise ValueError(f"資料欄位不足: {missing}")
 
     standardized = df.rename(columns=rename_map)[list(rename_map.values())].copy()
+    if COLS.channel not in standardized.columns:  # 沒有通路維度的資料集（sku）
+        standardized[COLS.channel] = "ALL"
     standardized[COLS.date] = _normalize_month(standardized[COLS.date])
     standardized[COLS.channel] = standardized[COLS.channel].astype(str).str.strip()
     standardized[COLS.series] = standardized[COLS.series].fillna("未分類").astype(str).str.strip()
     standardized[COLS.sales] = pd.to_numeric(standardized[COLS.sales], errors="coerce").fillna(0.0)
     standardized = standardized.dropna(subset=[COLS.date])
-    if "品名" in df.columns:  # 料號的顯示名稱
-        standardized["name"] = df["品名"].fillna("").astype(str).str.strip()
+    if "品名" in df.columns:  # 料號的顯示名稱：規格 品名（停產）
+        name = df["品名"].fillna("").astype(str).str.strip()
+        if "規格" in df.columns:
+            name = df["規格"].fillna("").astype(str).str.strip() + " " + name
+        if "備註" in df.columns:
+            name = name + np.where(df["備註"].astype(str).str.contains("停產"), "（停產）", "")
+        standardized["name"] = name.str.strip()
+    if "Sellout數量" in df.columns:  # 同料號的 Sell-out，需求計劃公式的 Sell-out 部分
+        standardized["sales_out"] = pd.to_numeric(df["Sellout數量"], errors="coerce").fillna(0.0)
     return standardized
 
 
@@ -385,19 +392,28 @@ def _dataset_from(value: Any) -> str:
     return value if value in DATASETS else "sellin"
 
 
-def get_channel_time_series(df: pd.DataFrame, channel: str, series: str | None = None) -> pd.Series:
-    filtered = df.copy()
+def get_channel_time_series(df: pd.DataFrame, channel: str, series: str | None = None,
+                            column: str = COLS.sales) -> pd.Series:
+    filtered = df
     if channel and channel != "ALL":
         filtered = filtered[filtered[COLS.channel] == channel]
     if series and series != "ALL":
         filtered = filtered[filtered[COLS.series] == series]
 
-    ts = filtered.groupby(COLS.date)[COLS.sales].sum().sort_index()
+    ts = filtered.groupby(COLS.date)[column].sum().sort_index()
     if len(ts):
         # 補到資料集最後一個月：已停賣的料號／通路，近期應視為 0 而不是截在最後有銷售的月份
         full_range = pd.date_range(ts.index.min(), df[COLS.date].max(), freq="MS")
         ts = ts.reindex(full_range, fill_value=0.0)
     return ts.astype(float)
+
+
+def get_sell_out_series(df: pd.DataFrame, channel: str, series: str | None, index: pd.Index) -> pd.Series | None:
+    """資料集有 Sell-out 欄（sku）時，回傳與 Sell-in 對齊的 Sell-out 時間序列；沒有則回傳 None。"""
+    if "sales_out" not in df.columns:
+        return None
+    ts = get_channel_time_series(df, channel, series, column="sales_out")
+    return ts.reindex(index, fill_value=0.0)
 
 
 def create_forecaster(method: str, params: dict[str, Any]):
@@ -437,7 +453,9 @@ def run_backtest(
     training_months: int = 24,
     forecast_months: int = 3,
     rolling_rounds: int = 12,
+    sell_out: pd.Series | None = None,
 ) -> dict[str, Any]:
+    """滾動回測。sell_out：與 ts 對齊的 Sell-out 序列，需求計劃公式（WeightedMA）會用來計算 Sell-out 部分。"""
     min_required = training_months + forecast_months + rolling_rounds - 1
     if len(ts) < min_required:
         return {"error": f"資料不足，至少需要 {min_required} 個月"}
@@ -458,7 +476,10 @@ def run_backtest(
         train_data = ts.iloc[train_start:train_end]
         test_data = ts.iloc[test_start:test_end]
         try:
-            forecaster.fit(train_data)
+            if sell_out is not None and isinstance(forecaster, WeightedMAForecaster):
+                forecaster.fit(train_data, sell_out.iloc[train_start:train_end])
+            else:
+                forecaster.fit(train_data)
             predictions = np.asarray(forecaster.predict(forecast_months), dtype=float)
         except Exception as exc:
             round_results.append({"round": round_idx + 1, "error": str(exc)})
@@ -525,9 +546,12 @@ def run_backtest(
 
 
 def _build_series_list(df: pd.DataFrame, dataset: str) -> list[dict[str, str]]:
-    if dataset == "sellout":
+    if dataset in ("sellout", "sku"):
         recent = df[df[COLS.date] > df[COLS.date].max() - pd.DateOffset(months=12)]
-        top = recent.groupby(COLS.series)[COLS.sales].sum().sort_values(ascending=False).head(SKU_LIST_SIZE)
+        top = recent.groupby(COLS.series)[COLS.sales].sum().sort_values(ascending=False)
+        top = top.reindex(top.index.union(df[COLS.series].unique()), fill_value=0).sort_values(ascending=False)
+        if dataset == "sellout":
+            top = top.head(SKU_LIST_SIZE)
         names = df.drop_duplicates(COLS.series, keep="last").set_index(COLS.series)["name"]
         return [{"key": "ALL", "name": "全部料號"}] + [
             {"key": sku, "name": f"{sku} {names.get(sku, '')}".strip()} for sku in top.index
@@ -559,7 +583,7 @@ def get_data_info():
     if df is None:
         return jsonify({"error": "找不到資料檔"}), 500
 
-    channels = sorted(df[COLS.channel].dropna().unique().tolist())
+    channels = sorted(c for c in df[COLS.channel].dropna().unique().tolist() if c != "ALL")
     return jsonify(
         {
             "channels": ["ALL"] + channels,
@@ -631,6 +655,7 @@ def run_backtest_api():
         training_months=backtest_config.get("training_months", 24),
         forecast_months=backtest_config.get("forecast_months", 3),
         rolling_rounds=backtest_config.get("rolling_rounds", 12),
+        sell_out=get_sell_out_series(df, channel, series, ts.index),
     )
     result.update(
         {
@@ -661,6 +686,7 @@ def compare_methods_api():
     ts = get_channel_time_series(df, channel, series)
     if len(ts) == 0:
         return jsonify({"error": f"沒有資料: {channel} / {series}"}), 400
+    sell_out = get_sell_out_series(df, channel, series, ts.index)
 
     results = []
     for item in methods_config:
@@ -672,6 +698,7 @@ def compare_methods_api():
             training_months=backtest_config.get("training_months", 24),
             forecast_months=backtest_config.get("forecast_months", 3),
             rolling_rounds=backtest_config.get("rolling_rounds", 12),
+            sell_out=sell_out,
         )
         result.update({"method": method, "params": params, "label": method_label(method, params)})
         results.append(result)
@@ -776,7 +803,8 @@ PLAN_TRAINING_MONTHS = 24  # 與回測預設相同
 PLAN_FORECAST_MONTHS = 3   # 對應製程週期
 
 
-def _backtest_forecast_choices(ts: pd.Series, formula_params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+def _backtest_forecast_choices(ts: pd.Series, formula_params: dict[str, Any] | None = None,
+                               sell_out: pd.Series | None = None) -> list[dict[str, Any]]:
     """以預設回測設定（訓練 24／預測 3／12 輪）回測各方法，依 wMAPE 由低到高排序，保留完整結果。
     需求計劃公式使用頁面上設定的 MA 期數與權重。"""
     results = []
@@ -784,15 +812,30 @@ def _backtest_forecast_choices(ts: pd.Series, formula_params: dict[str, Any] | N
         if key == "WeightedMA":
             params = {**DEFAULT_FORMULA_PARAMS, **(formula_params or {})}
             label = method_label(method, params)
-        result = run_backtest(ts, create_forecaster(method, params))
+        result = run_backtest(ts, create_forecaster(method, params), sell_out=sell_out)
         if "overall" in result:
             results.append({**result, "key": key, "label": label, "method": method, "params": params})
     return sorted(results, key=lambda item: item["overall"]["wmape"])
 
 
-def _rank_forecast_choices(ts: pd.Series, formula_params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+def _rank_forecast_choices(ts: pd.Series, formula_params: dict[str, Any] | None = None,
+                          sell_out: pd.Series | None = None) -> list[dict[str, Any]]:
     return [{"key": r["key"], "label": r["label"], "wmape": r["overall"]["wmape"], "bias": r["overall"]["bias"]}
-            for r in _backtest_forecast_choices(ts, formula_params)]
+            for r in _backtest_forecast_choices(ts, formula_params, sell_out)]
+
+
+def _plan_target(payload: dict[str, Any]):
+    """需求計劃的計算對象：通路（Sell-in 金額）或料號（sku 資料集，數量）。回傳 (dataset, df, channel, series) 或錯誤訊息。"""
+    dataset = "sku" if payload.get("dataset") == "sku" else "sellin"
+    df = load_data(dataset)
+    if df is None:
+        return "找不到資料檔"
+    if dataset == "sku":
+        series = payload.get("series")
+        if not series or series == "ALL":
+            return "請選擇料號"
+        return dataset, df, "ALL", series
+    return dataset, df, payload.get("channel") or "ALL", payload.get("series", "ALL")
 
 
 def _formula_params_from(payload: dict[str, Any]) -> dict[str, Any]:
@@ -822,17 +865,15 @@ def _forecast_monthly_average(ts: pd.Series, key: str) -> dict[str, Any]:
 @app.route("/api/demand-planning/calculate-from-data", methods=["POST"])
 def calculate_demand_planning_from_data():
     payload = request.get_json(silent=True) or {}
-    df = load_data()
-    if df is None:
-        return jsonify({"success": False, "error": "找不到資料檔"})
+    target = _plan_target(payload)
+    if isinstance(target, str):
+        return jsonify({"success": False, "error": target})
+    dataset, df, channel, series = target
 
-    channel = payload.get("channel")
-    if not channel:
-        return jsonify({"success": False, "error": "請提供通路"})
-
-    ts = get_channel_time_series(df, channel, payload.get("series", "ALL"))
+    ts = get_channel_time_series(df, channel, series)
     if len(ts) == 0:
-        return jsonify({"success": False, "error": "該通路沒有資料"})
+        return jsonify({"success": False, "error": "沒有資料"})
+    sell_out = get_sell_out_series(df, channel, series, ts.index)
 
     ma_periods = payload.get("ma_periods", {})
     period_1 = ma_periods.get("period_1", 12)
@@ -843,11 +884,15 @@ def calculate_demand_planning_from_data():
     sell_in_ma2 = _calculate_ma(ts, period_2)
     sell_in_ma3 = _calculate_ma(ts, period_3)
 
+    # Sell-out：有資料（sku）時用實際值；沒有時依設定以 Sell-in 代替，或不計入
     use_sell_in_as_sell_out = payload.get("use_sell_in_as_sell_out", True)
-    if use_sell_in_as_sell_out:
+    has_sell_out = sell_out is not None and sell_out.sum() > 0
+    if has_sell_out:
+        sell_out_ma1, sell_out_ma2, sell_out_ma3 = (_calculate_ma(sell_out, p) for p in (period_1, period_2, period_3))
+    elif use_sell_in_as_sell_out:
         sell_out_ma1, sell_out_ma2, sell_out_ma3 = sell_in_ma1, sell_in_ma2, sell_in_ma3
     else:
-        sell_out_ma1, sell_out_ma2, sell_out_ma3 = sell_in_ma1, sell_in_ma2, sell_in_ma3
+        sell_out_ma1 = sell_out_ma2 = sell_out_ma3 = 0.0
 
     config_data = payload.get("config", {})
     config = DemandPlanningConfig(
@@ -859,7 +904,7 @@ def calculate_demand_planning_from_data():
         order_lead_days=config_data.get("order_lead_days", 60),
     )
     # 預估月均銷的方法：現行公式（預設）、自動（回測最準）或指定方法
-    ranking = _rank_forecast_choices(ts, _formula_params_from(payload))
+    ranking = _rank_forecast_choices(ts, _formula_params_from(payload), sell_out)
     requested = payload.get("forecast_method", "WeightedMA")
     if requested == "auto":
         chosen = ranking[0]["key"] if ranking else "WeightedMA"
@@ -900,6 +945,7 @@ def calculate_demand_planning_from_data():
         "ranking": ranking,
         "data_end": str(ts.index[-1].date()),
     }
+    response["target"] = {"dataset": dataset, "unit": DATASETS[dataset]["unit"], "has_sell_out": bool(has_sell_out)}
     response["calculated_ma"] = {
         "sell_in_ma1": sell_in_ma1,
         "sell_in_ma2": sell_in_ma2,
@@ -915,18 +961,69 @@ def calculate_demand_planning_from_data():
 def backtest_demand_planning():
     """回測需求計劃頁的預估月均銷公式（使用頁面上的 MA 與權重），並與其他方法比較。"""
     payload = request.get_json(silent=True) or {}
-    df = load_data()
-    if df is None:
-        return jsonify({"error": "找不到資料檔"}), 500
-    channel = payload.get("channel") or "ALL"
-    ts = get_channel_time_series(df, channel, payload.get("series", "ALL"))
+    target = _plan_target(payload)
+    if isinstance(target, str):
+        return jsonify({"error": target}), 400
+    dataset, df, channel, series = target
+    ts = get_channel_time_series(df, channel, series)
     if len(ts) == 0:
-        return jsonify({"error": "該通路沒有資料"}), 400
-    results = _backtest_forecast_choices(ts, _formula_params_from(payload))
+        return jsonify({"error": "沒有資料"}), 400
+    sell_out = get_sell_out_series(df, channel, series, ts.index)
+    results = _backtest_forecast_choices(ts, _formula_params_from(payload), sell_out)
     if not results:
         min_required = PLAN_TRAINING_MONTHS + PLAN_FORECAST_MONTHS + 12 - 1
-        return jsonify({"error": f"「{channel}」資料只有 {len(ts)} 個月，回測至少需要 {min_required} 個月"}), 400
-    return jsonify({"channel": channel, "results": results, "data_end": ts.index[-1].strftime("%Y-%m")})
+        name = series if dataset == "sku" else channel
+        return jsonify({"error": f"「{name}」資料只有 {len(ts)} 個月，回測至少需要 {min_required} 個月"}), 400
+    return jsonify({"dataset": dataset, "channel": channel, "series": series, "results": results,
+                    "data_end": ts.index[-1].strftime("%Y-%m")})
+
+
+def load_sku_stock() -> pd.DataFrame | None:
+    """存貨可用月數表最新一期的庫存參考（料號 → 再製中、各倉、預估月均銷X、ROP…）。"""
+    if "sku_stock" in DATA_CACHE:
+        return DATA_CACHE["sku_stock"]
+    try:
+        if SKU_STOCK_FILE is not None:
+            stock = pd.read_csv(SKU_STOCK_FILE, dtype={"料號": str, "庫存日期": str}) if SKU_STOCK_FILE.exists() else None
+        elif DATASETS["sku"]["file"].exists():
+            stock = pd.read_excel(DATASETS["sku"]["file"], sheet_name="庫存參考", dtype={"料號": str, "庫存日期": str})
+        else:
+            stock = None
+    except Exception as exc:
+        print(f"load_sku_stock failed: {exc}")
+        stock = None
+    DATA_CACHE["sku_stock"] = stock
+    return stock
+
+
+AGING_COLS = ["2年以上", "1.5年~2年", "1年~1.5年", "0.5年~1年", "0.5年以下"]
+
+
+@app.route("/api/demand-planning/sku-list")
+def get_sku_list():
+    """料號選單：依近 12 個月 Sell-in 數量排序，附庫存參考。"""
+    df = load_data("sku")
+    if df is None:
+        return jsonify({"error": "找不到料號數量資料（執行 python parse_sku_quantity.py）"}), 404
+    stock = load_sku_stock()
+    stock_map = {} if stock is None else {
+        row["料號"]: row for row in stock.astype(object).where(stock.notna(), None).to_dict("records")}  # NaN 不是合法 JSON
+    items = []
+    for item in _build_series_list(df, "sku")[1:]:
+        ref = stock_map.get(item["key"])
+        if ref is not None:
+            num = lambda v: float(v) if isinstance(v, (int, float)) else 0.0
+            ref = {
+                "date": str(ref.get("庫存日期") or "").zfill(4),
+                "warehouse_stock": sum(num(ref.get(c)) for c in AGING_COLS),  # 總倉庫存＝各效期區間加總
+                "in_production": num(ref.get("再製中")),
+                "momo": num(ref.get("MOMO")), "boxful": num(ref.get("BOXFUL")),
+                "sheet_forecast": num(ref.get("預估月均銷X")), "sheet_rop": num(ref.get("ROP")),
+                "sheet_decision": ref.get("是否再製"), "sheet_months": num(ref.get("存貨可用月數")),
+                "lead_time_note": ref.get("交期"),
+            }
+        items.append({**item, "stock": ref})
+    return jsonify({"items": items, "data_end": df[COLS.date].max().strftime("%Y-%m")})
 
 
 @app.route("/api/records/shared")

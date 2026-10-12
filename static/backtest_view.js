@@ -5,12 +5,15 @@
  *   BV.guideHTML()                                「如何閱讀回測結果」說明
  *   BV.Records                                    我的回測紀錄（網頁版以登入密碼加密後存在瀏覽器）
  *   BV.findShared(...)                            共用回測總表（發布時預先跑好）
+ * 方法與參數的說明在 static/method_docs.js（METHOD_DOCS、tuningHint）。
  * result 格式：{label, method, params, overall:{wmape,mape,bias,rmse,acc_10,acc_20}, rounds:[{months,actuals,forecasts,wmape,bias,...}]}
  */
 (() => {
   const FORMULA = "WeightedMA";
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const pct = (v) => (v * 100).toFixed(1) + "%";
+  const doc = (method) => (window.METHOD_DOCS || {})[method] || null;
+  const UNRELIABLE = 0.5; // 最準方法的 wMAPE 仍超過此值時，排名參考價值低
   const pp = (v) => Math.abs(v * 100).toFixed(1);
 
   function qty(v, unit) {
@@ -116,6 +119,14 @@
       }
     }
 
+    if (best && best === r && doc(r.method)?.wins) {
+      lines.push(best.overall.wmape > UNRELIABLE
+        ? `<b>注意：</b>所有方法的誤差都超過 ${UNRELIABLE * 100}%，此對象銷售很不穩定（常見於停產、換料號、剛上市或零星出貨），排名參考價值低，建議人工判斷。`
+        : `<b>這代表：</b>${doc(r.method).wins}`);
+    }
+    const hint = window.tuningHint?.(r);
+    if (hint) lines.push(`<b>參數建議：</b>${hint}`);
+
     const advice = o.wmape < 0.2 ? "誤差在可接受範圍，可直接作為備貨參考。"
       : o.wmape < 0.3 ? "可作為參考，但旺季與促銷月份仍需人工調整。"
       : "誤差偏大，建議搭配促銷計畫與通路回報人工判斷，不宜單獨依賴此預測。";
@@ -133,7 +144,13 @@
     if (formula && formula !== best) {
       summary += `；需求計劃公式排第 <b>${formulaRank}</b> 名（${pct(formula.overall.wmape)}，多 ${pp(formula.overall.wmape - best.overall.wmape)} 個百分點）`;
     } else if (formula) summary += "，就是需求計劃公式";
-    summary += "。點選任一列可查看該方法的明細。";
+    summary += "。";
+    if (best.overall.wmape > UNRELIABLE) {
+      summary += `<br><span class="text-amber-700">所有方法誤差都超過 ${UNRELIABLE * 100}%，此對象銷售很不穩定（停產、換料號、剛上市或零星出貨），排名僅供參考。</span>`;
+    } else if (doc(best.method)?.wins) {
+      summary += `<br>最準方法代表：${doc(best.method).wins}`;
+    }
+    summary += '<br><span class="text-gray-400">點選任一列可查看該方法的說明與明細；滑鼠移到方法名稱可看簡介。</span>';
     const skipped = (ctx.skipped || []).map((s) => `${esc(s.label)}：${esc(s.error)}`).join("；");
 
     el.innerHTML = `
@@ -154,7 +171,7 @@
             const rt = rating("wmape", r.overall.wmape);
             return `<tr data-i="${i}" class="border-b cursor-pointer hover:bg-indigo-50 ${isF ? "bg-amber-50" : i === 0 ? "bg-green-50" : ""}">
               <td class="px-3 py-2 font-medium">${i + 1}</td>
-              <td class="px-3 py-2">${esc(r.label)}${isF ? ' <span class="text-xs text-amber-700">◆ 需求計劃</span>' : ""}${i === 0 ? ' <span class="text-xs text-green-700">最準</span>' : ""}</td>
+              <td class="px-3 py-2" title="${esc(doc(r.method)?.short || "")}">${esc(r.label)}${isF ? ' <span class="text-xs text-amber-700">◆ 需求計劃</span>' : ""}${i === 0 ? ' <span class="text-xs text-green-700">最準</span>' : ""}</td>
               <td class="px-3 py-2"><div class="flex items-center gap-2">
                 <div class="flex-1 bg-gray-100 rounded h-2"><div class="h-2 rounded bg-${rt.color}-400" style="width:${(r.overall.wmape / maxW * 100).toFixed(0)}%"></div></div>
                 <span class="w-14 text-right font-semibold text-${rt.color}-700">${pct(r.overall.wmape)}</span></div></td>
@@ -196,6 +213,7 @@
           <div class="font-medium text-indigo-800 mb-2">結果解讀</div>
           <ul class="list-disc pl-5 space-y-1 text-sm text-gray-700">${explain(r, ctx).map((l) => `<li>${l}</li>`).join("")}</ul>
         </div>
+        ${methodBox(r)}
         <div class="grid grid-cols-2 md:grid-cols-3 gap-3">${METRICS.map(([k, name, tip, f]) => {
           const v = o[k];
           const rt = RATINGS[k] ? rating(k, v) : null;
@@ -235,6 +253,25 @@
         <p class="text-xs text-gray-400 mt-2">實際／預測為該輪預測期的合計；滑鼠移到列上可看各月數字。</p>
       </div>` : `<div class="bg-white rounded-xl shadow-sm p-6 text-sm text-gray-500">這筆紀錄沒有逐輪明細。</div>`}`;
     if (rounds.length) drawChart(el.querySelector("canvas"), rounds, unit);
+  }
+
+  /** 方法怎麼算、適合與注意事項、本次使用的參數 */
+  function methodBox(r) {
+    const d = doc(r.method);
+    if (!d) return "";
+    const params = Object.entries(r.params || {})
+      .filter(([k]) => d.params[k])
+      .map(([k, v]) => `<li><b>${esc(k === "seasonal_type" ? (v === "mul" ? "乘法" : "加法") : v === true ? "是" : v === false ? "否" : v)}</b>｜${esc(d.params[k])}</li>`)
+      .join("");
+    return `
+      <details class="border rounded-lg p-4 mb-4 text-sm text-gray-700">
+        <summary class="cursor-pointer font-medium text-gray-800">這個方法怎麼算？</summary>
+        <p class="mt-2">${esc(d.short)}${esc(d.how)}</p>
+        <p class="mt-2 font-mono text-xs bg-gray-50 rounded p-2">${esc(d.formula)}</p>
+        <p class="mt-2"><b>適合：</b>${esc(d.good)}</p>
+        <p class="mt-1"><b>注意：</b>${esc(d.watch)}</p>
+        ${params ? `<div class="mt-2"><b>本次參數：</b><ul class="list-disc pl-5 mt-1 space-y-0.5">${params}</ul></div>` : ""}
+      </details>`;
   }
 
   function drawChart(canvas, rounds, unit) {
@@ -279,6 +316,12 @@
           <p><b>±10%／±20% 內</b>：預測值落在實際值 ±10%／±20% 範圍內的比例，越高越好。</p>
           <p><b>MAPE</b>：每個月誤差百分比的平均；銷售很小的月份誤差百分比會被放大，僅供參考。<b>RMSE</b>：誤差的典型大小，單位與銷售相同。</p>
           <p><b>需求計劃公式</b>：(MA-12 + MA-6 + MA-3) ÷ 3，再依 Sell-in／Sell-out 權重加權、四捨五入到百位；未來 3 個月都用同一個數字。</p>
+          <div><b>各方法一覽</b>
+            <ul class="list-disc pl-5 mt-1 space-y-1">${Object.values(window.METHOD_DOCS || {}).map((d) =>
+              `<li><b>${esc(d.name)}</b>：${esc(d.short)}<span class="text-gray-500">適合${esc(d.good)}</span></li>`).join("")}</ul>
+          </div>
+          <p><b>參數怎麼調</b>：預測持續偏高（Bias &gt; +5%）通常代表銷售在下滑、方法跟不上，可縮短平均期數或提高 α；持續偏低則相反。
+             結果解讀中的「參數建議」會依本次結果提示。</p>
           <p class="text-gray-500"><b>注意</b>：回測只有 12 輪，少數促銷或缺貨月份就可能改變排名；資料少於 38 個月無法回測。
              料號層級的單月波動大，誤差普遍比通路、系列層級高。</p>
         </div>

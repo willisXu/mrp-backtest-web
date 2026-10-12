@@ -1,13 +1,14 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <script src="bridge.js?v=397189af83"></script>
+    <script src="bridge.js?v=f0611ef23c"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>回測紀錄 - MRP 生產預測回測</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <script src="static/backtest_view.js?v=397189af83"></script>
+    <script src="static/method_docs.js?v=f0611ef23c"></script>
+    <script src="static/backtest_view.js?v=f0611ef23c"></script>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Noto Sans TC', sans-serif; }
@@ -186,9 +187,11 @@
             const formulaOf = e => e.results.find(r => r.method === BV.FORMULA);
 
             // 統計：需求計劃公式最準幾筆、最常勝出的方法、依銷售加權的平均誤差
+            // 最準方法誤差仍 >50% 的項目（停產、換料號等）不列入「最常勝出」
+            const reliable = ok.filter(e => e.results[0].overall.wmape <= 0.5);
             const wins = {};
-            ok.forEach(e => { wins[e.results[0].label] = (wins[e.results[0].label] || 0) + 1; });
-            const topWin = Object.entries(wins).sort((a, b) => b[1] - a[1])[0];
+            reliable.forEach(e => { wins[e.results[0].label] = (wins[e.results[0].label] || 0) + 1; });
+            const topWin = Object.entries(wins).sort((a, b) => b[1] - a[1])[0] || ['-', 0];
             const formulaBest = ok.filter(e => e.results[0].method === BV.FORMULA).length;
             const vol = ok.reduce((s, e) => s + e.volume, 0) || 1;
             const wBest = ok.reduce((s, e) => s + e.results[0].overall.wmape * e.volume, 0) / vol;
@@ -198,7 +201,8 @@
                 <div class="text-xs text-gray-500 mt-1">${note}</div></div>`;
             document.getElementById('shared-stats').innerHTML = ok.length ? [
                 card('需求計劃公式最準', `${formulaBest} / ${ok.length}`, `可回測的 ${ok.length} 筆中，現行公式排第 1 的筆數`),
-                card('最常勝出的方法', BV.esc(topWin[0]), `${topWin[1]} 筆排第 1`),
+                card('最常勝出的方法', BV.esc(topWin[0]), `${topWin[1]} 筆排第 1` +
+                     (ok.length > reliable.length ? `（不含誤差 >50% 的 ${ok.length - reliable.length} 筆）` : '')),
                 card('平均誤差（依銷售加權）', `${BV.pct(wFormula)} → ${BV.pct(wBest)}`,
                      `需求計劃公式 → 每筆改用最準方法（事後挑選，實際效果會略差）`),
             ].join('') : '';
