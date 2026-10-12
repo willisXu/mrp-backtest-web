@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <script src="bridge.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>需求計劃系統 - 生產公式計算</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans TC', sans-serif; }
+        .formula-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .result-highlight {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.8; }
+        }
+        .input-group:focus-within {
+            transform: scale(1.01);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 bg-gradient-to-br from-green-500 to-teal-600 rounded-lg flex items-center justify-center">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-gray-800">需求計劃系統</h1>
+                        <p class="text-sm text-gray-500">生產公式計算與參數調整</p>
+                    </div>
+                </div>
+                <a href="index.html" class="text-indigo-600 hover:text-indigo-800 flex items-center">
+                    <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+                    </svg>
+                    返回回測系統
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        <!-- 公式說明區 -->
+        <div class="mb-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div class="formula-card rounded-xl p-4 text-white">
+                <h3 class="font-bold mb-2">預估月均銷量 (AB)</h3>
+                <code class="text-sm bg-white/20 px-2 py-1 rounded">Sell-in×0.7 + Sell-out×0.3</code>
+            </div>
+            <div class="formula-card rounded-xl p-4 text-white">
+                <h3 class="font-bold mb-2">再訂購點 ROP (G)</h3>
+                <code class="text-sm bg-white/20 px-2 py-1 rounded">月均銷 × (LT + 安全庫存)</code>
+            </div>
+            <div class="formula-card rounded-xl p-4 text-white">
+                <h3 class="font-bold mb-2">再製量 (L)</h3>
+                <code class="text-sm bg-white/20 px-2 py-1 rounded">月均銷 × 生產係數</code>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- 左側：輸入區 -->
+            <div class="lg:col-span-2 space-y-6">
+                <!-- 通路與公式設定 -->
+                <div class="bg-white rounded-xl shadow-sm p-6">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                        <svg class="w-5 h-5 mr-2 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                        </svg>
+                        公式參數設定
+                    </h2>
+                    
+                    <!-- 通路選擇 -->
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">選擇通路</label>
+                        <select id="channel-select" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <option value="">載入中...</option>
+                        </select>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-6">
+                        <!-- 移動平均月份數設定 -->
+                        <div class="space-y-4">
+                            <h3 class="font-medium text-gray-700 border-b pb-2">移動平均月份數設定</h3>
+                            <div>
+                                <label class="block text-sm text-gray-600 mb-1">
+                                    MA 月份數 1
+                                    <span id="ma_period_1_value" class="text-blue-600 font-semibold ml-2">12</span>
+                                </label>
+                                <input type="range" id="ma_period_1" min="1" max="24" value="12" step="1"
+                                       class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-600 mb-1">
+                                    MA 月份數 2
+                                    <span id="ma_period_2_value" class="text-blue-600 font-semibold ml-2">6</span>
+                                </label>
+                                <input type="range" id="ma_period_2" min="1" max="24" value="6" step="1"
+                                       class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-600 mb-1">
+                                    MA 月份數 3
+                                    <span id="ma_period_3_value" class="text-blue-600 font-semibold ml-2">3</span>
+                                </label>
+                                <input type="range" id="ma_period_3" min="1" max="24" value="3" step="1"
+                                       class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                            </div>
+                        </div>
+                        
+                        <!-- Sell-in / Sell-out 權重設定 -->
+                        <div class="space-y-4">
+                            <h3 class="font-medium text-gray-700 border-b pb-2">權重與替代設定</h3>
+                            <div>
+                                <label class="block text-sm text-gray-600 mb-1">
+                                    Sell-in 權重
+                                    <span id="sell_in_weight_value" class="text-green-600 font-semibold ml-2">0.7</span>
+                                </label>
+                                <input type="range" id="sell_in_weight" min="0" max="1" value="0.7" step="0.05"
+                                       class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-600 mb-1">
+                                    Sell-out 權重
+                                    <span id="sell_out_weight_value" class="text-green-600 font-semibold ml-2">0.3</span>
+                                </label>
+                                <input type="range" id="sell_out_weight" min="0" max="1" value="0.3" step="0.05"
+                                       class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer" disabled>
+                                <p class="text-xs text-gray-400 mt-1">自動計算 (1 - Sell-in 權重)</p>
+                            </div>
+                            <div class="flex items-center p-3 bg-gray-50 rounded-lg">
+                                <input type="checkbox" id="use_sell_in_as_sell_out" checked
+                                       class="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500">
+                                <label for="use_sell_in_as_sell_out" class="ml-3 text-sm font-medium text-gray-700">
+                                    無 Sell-out 數據時，用 Sell-in 替代
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 計算出的 MA 數值顯示 -->
+                    <div id="calculated-ma" class="mt-6 p-4 bg-blue-50 rounded-lg hidden">
+                        <h4 class="font-medium text-blue-800 mb-3">計算出的移動平均值</h4>
+                        <div class="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <span class="text-gray-600">Sell-in MA-<span id="ma1-label">12</span>:</span>
+                                <span id="calc-sell-in-ma1" class="font-semibold ml-2">-</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600">Sell-out MA-<span id="ma1-label-out">12</span>:</span>
+                                <span id="calc-sell-out-ma1" class="font-semibold ml-2">-</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600">Sell-in MA-<span id="ma2-label">6</span>:</span>
+                                <span id="calc-sell-in-ma2" class="font-semibold ml-2">-</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600">Sell-out MA-<span id="ma2-label-out">6</span>:</span>
+                                <span id="calc-sell-out-ma2" class="font-semibold ml-2">-</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600">Sell-in MA-<span id="ma3-label">3</span>:</span>
+                                <span id="calc-sell-in-ma3" class="font-semibold ml-2">-</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600">Sell-out MA-<span id="ma3-label-out">3</span>:</span>
+                                <span id="calc-sell-out-ma3" class="font-semibold ml-2">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 庫存狀態輸入 -->
+                <div class="bg-white rounded-xl shadow-sm p-6">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                        <svg class="w-5 h-5 mr-2 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path>
+                        </svg>
+                        庫存狀態
+                    </h2>
+                    
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        <div class="input-group transition-transform">
+                            <label class="block text-sm text-gray-600 mb-1">總倉庫存 (R)</label>
+                            <input type="number" id="warehouse_stock" value="13800" 
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                        </div>
+                        <div class="input-group transition-transform">
+                            <label class="block text-sm text-gray-600 mb-1">再製中 (P)</label>
+                            <input type="number" id="in_production" value="19002" 
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                        </div>
+                        <div class="input-group transition-transform">
+                            <label class="block text-sm text-gray-600 mb-1">組包預留 (AC)</label>
+                            <input type="number" id="combo_reserved" value="8000" 
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                        </div>
+                        <div class="input-group transition-transform">
+                            <label class="block text-sm text-gray-600 mb-1">深促預留 (AD)</label>
+                            <input type="number" id="promo_reserved" value="5000" 
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                        </div>
+                        <div class="input-group transition-transform">
+                            <label class="block text-sm text-gray-600 mb-1">行銷預留 (AE)</label>
+                            <input type="number" id="marketing_reserved" value="5000" 
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                        </div>
+                        <div class="input-group transition-transform">
+                            <label class="block text-sm text-gray-600 mb-1">決議再製量 (N) <span class="text-gray-400">選填</span></label>
+                            <input type="number" id="confirmed_quantity" placeholder="人工輸入" 
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 執行按鈕 -->
+                <button id="calculate-btn" class="w-full bg-gradient-to-r from-green-500 to-teal-600 text-white py-4 px-6 rounded-xl font-medium text-lg hover:from-green-600 hover:to-teal-700 transition-all duration-300 flex items-center justify-center shadow-lg">
+                    <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+                    </svg>
+                    執行計算
+                </button>
+            </div>
+
+            <!-- 右側：參數設定 -->
+            <div class="space-y-6">
+                <!-- 公式參數 -->
+                <div class="bg-white rounded-xl shadow-sm p-6">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                        <svg class="w-5 h-5 mr-2 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path>
+                        </svg>
+                        公式參數
+                    </h2>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                                Sell-in 權重
+                                <span id="sell_in_weight_value" class="text-purple-600 font-semibold ml-2">0.7</span>
+                            </label>
+                            <input type="range" id="sell_in_weight" min="0" max="1" value="0.7" step="0.05"
+                                   class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                                前置時間 (月)
+                                <span id="lead_time_months_value" class="text-purple-600 font-semibold ml-2">3.5</span>
+                            </label>
+                            <input type="range" id="lead_time_months" min="1" max="12" value="3.5" step="0.5"
+                                   class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                                安全庫存 (月)
+                                <span id="safety_stock_months_value" class="text-purple-600 font-semibold ml-2">2.0</span>
+                            </label>
+                            <input type="range" id="safety_stock_months" min="0" max="6" value="2" step="0.5"
+                                   class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                                生產係數
+                                <span id="production_coefficient_value" class="text-purple-600 font-semibold ml-2">7</span>
+                            </label>
+                            <input type="range" id="production_coefficient" min="1" max="12" value="7" step="1"
+                                   class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                                提前下單天數
+                                <span id="order_lead_days_value" class="text-purple-600 font-semibold ml-2">60</span>
+                            </label>
+                            <input type="range" id="order_lead_days" min="30" max="120" value="60" step="10"
+                                   class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 計算結果 -->
+                <div id="results-panel" class="bg-white rounded-xl shadow-sm p-6 hidden">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                        <svg class="w-5 h-5 mr-2 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        計算結果
+                    </h2>
+                    
+                    <div class="space-y-4">
+                        <!-- 銷售分析 -->
+                        <div class="bg-blue-50 rounded-lg p-4">
+                            <h3 class="font-medium text-blue-800 mb-2">銷售分析</h3>
+                            <div class="grid grid-cols-2 gap-2 text-sm">
+                                <div>Sell-in 平均:</div>
+                                <div id="result-sell-in-avg" class="font-semibold text-right">-</div>
+                                <div>Sell-out 平均:</div>
+                                <div id="result-sell-out-avg" class="font-semibold text-right">-</div>
+                                <div class="text-blue-700 font-medium">預估月均銷 (AB):</div>
+                                <div id="result-monthly-sales" class="font-bold text-blue-700 text-right">-</div>
+                            </div>
+                        </div>
+                        
+                        <!-- 庫存需求 -->
+                        <div class="bg-orange-50 rounded-lg p-4">
+                            <h3 class="font-medium text-orange-800 mb-2">庫存與需求</h3>
+                            <div class="grid grid-cols-2 gap-2 text-sm">
+                                <div>再訂購點 (ROP):</div>
+                                <div id="result-rop" class="font-semibold text-right">-</div>
+                                <div>可用庫存:</div>
+                                <div id="result-available" class="font-semibold text-right">-</div>
+                                <div>總需求:</div>
+                                <div id="result-demand" class="font-semibold text-right">-</div>
+                            </div>
+                        </div>
+                        
+                        <!-- 再製判斷 -->
+                        <div id="production-decision" class="rounded-lg p-4">
+                            <h3 class="font-medium mb-2">再製判斷</h3>
+                            <div class="flex items-center justify-between">
+                                <span>是否需要再製:</span>
+                                <span id="result-need-production" class="font-bold text-lg">-</span>
+                            </div>
+                            <div class="flex items-center justify-between mt-2">
+                                <span>建議再製量:</span>
+                                <span id="result-suggested-qty" class="font-bold">-</span>
+                            </div>
+                        </div>
+                        
+                        <!-- 庫存狀態 -->
+                        <div class="bg-gray-50 rounded-lg p-4">
+                            <h3 class="font-medium text-gray-800 mb-2">庫存狀態</h3>
+                            <div class="grid grid-cols-2 gap-2 text-sm">
+                                <div>現有可用月數:</div>
+                                <div id="result-current-months" class="font-semibold text-right">-</div>
+                                <div>庫存銷完日:</div>
+                                <div id="result-depletion-date" class="font-semibold text-right">-</div>
+                                <div>計劃可用月數:</div>
+                                <div id="result-planned-months" class="font-semibold text-right">-</div>
+                                <div>計劃銷完日:</div>
+                                <div id="result-planned-date" class="font-semibold text-right">-</div>
+                            </div>
+                        </div>
+                        
+                        <!-- 需求交期 -->
+                        <div id="order-info" class="bg-purple-50 rounded-lg p-4 hidden">
+                            <h3 class="font-medium text-purple-800 mb-2">訂單資訊</h3>
+                            <div class="grid grid-cols-2 gap-2 text-sm">
+                                <div>需求交期:</div>
+                                <div id="result-order-deadline" class="font-bold text-purple-700 text-right">-</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-xl p-8 flex flex-col items-center">
+            <div class="w-8 h-8 border-3 border-green-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+            <p class="text-gray-600">計算中...</p>
+        </div>
+    </div>
+
+    <script>
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            loadChannels();
+            setupSliders();
+            document.getElementById('calculate-btn').addEventListener('click', calculate);
+        });
+
+        // 載入通路列表
+        async function loadChannels() {
+            try {
+                const response = await fetch('/api/data/info');
+                const data = await response.json();
+                const select = document.getElementById('channel-select');
+                select.innerHTML = data.channels.map(ch => 
+                    `<option value="${ch}">${ch}</option>`
+                ).join('');
+            } catch (e) {
+                console.error('載入通路失敗:', e);
+            }
+        }
+
+        // 設定滑桿
+        function setupSliders() {
+            const sliders = [
+                'ma_period_1', 'ma_period_2', 'ma_period_3',
+                'sell_in_weight', 'lead_time_months', 'safety_stock_months',
+                'production_coefficient', 'order_lead_days'
+            ];
+            
+            sliders.forEach(id => {
+                const slider = document.getElementById(id);
+                const valueSpan = document.getElementById(`${id}_value`);
+                if (slider && valueSpan) {
+                    slider.addEventListener('input', () => {
+                        valueSpan.textContent = slider.value;
+                        // 更新 MA 標籤
+                        if (id === 'ma_period_1') {
+                            document.getElementById('ma1-label').textContent = slider.value;
+                            document.getElementById('ma1-label-out').textContent = slider.value;
+                        } else if (id === 'ma_period_2') {
+                            document.getElementById('ma2-label').textContent = slider.value;
+                            document.getElementById('ma2-label-out').textContent = slider.value;
+                        } else if (id === 'ma_period_3') {
+                            document.getElementById('ma3-label').textContent = slider.value;
+                            document.getElementById('ma3-label-out').textContent = slider.value;
+                        }
+                        // 自動更新 Sell-out 權重
+                        if (id === 'sell_in_weight') {
+                            const sellOutWeight = (1 - parseFloat(slider.value)).toFixed(2);
+                            document.getElementById('sell_out_weight').value = sellOutWeight;
+                            document.getElementById('sell_out_weight_value').textContent = sellOutWeight;
+                        }
+                    });
+                }
+            });
+        }
+
+        // 執行計算
+        async function calculate() {
+            const channel = document.getElementById('channel-select').value;
+            if (!channel) {
+                alert('請選擇通路');
+                return;
+            }
+            
+            const data = {
+                channel: channel,
+                config: {
+                    sell_in_weight: parseFloat(document.getElementById('sell_in_weight').value),
+                    sell_out_weight: 1 - parseFloat(document.getElementById('sell_in_weight').value),
+                    lead_time_months: parseFloat(document.getElementById('lead_time_months').value),
+                    safety_stock_months: parseFloat(document.getElementById('safety_stock_months').value),
+                    production_coefficient: parseFloat(document.getElementById('production_coefficient').value),
+                    order_lead_days: parseInt(document.getElementById('order_lead_days').value)
+                },
+                ma_periods: {
+                    period_1: parseInt(document.getElementById('ma_period_1').value),
+                    period_2: parseInt(document.getElementById('ma_period_2').value),
+                    period_3: parseInt(document.getElementById('ma_period_3').value)
+                },
+                use_sell_in_as_sell_out: document.getElementById('use_sell_in_as_sell_out').checked,
+                inventory: {
+                    warehouse_stock: parseFloat(document.getElementById('warehouse_stock').value) || 0,
+                    in_production: parseFloat(document.getElementById('in_production').value) || 0,
+                    combo_reserved: parseFloat(document.getElementById('combo_reserved').value) || 0,
+                    promo_reserved: parseFloat(document.getElementById('promo_reserved').value) || 0,
+                    marketing_reserved: parseFloat(document.getElementById('marketing_reserved').value) || 0
+                }
+            };
+            
+            const confirmedQty = document.getElementById('confirmed_quantity').value;
+            if (confirmedQty) {
+                data.confirmed_quantity = parseFloat(confirmedQty);
+            }
+            
+            document.getElementById('loading-overlay').classList.remove('hidden');
+            
+            try {
+                const response = await fetch('/api/demand-planning/calculate-from-data', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    displayCalculatedMA(result.calculated_ma);
+                    displayResults(result);
+                } else {
+                    alert('計算失敗: ' + (result.error || '未知錯誤'));
+                }
+            } catch (e) {
+                console.error('計算失敗:', e);
+                alert('計算失敗');
+            } finally {
+                document.getElementById('loading-overlay').classList.add('hidden');
+            }
+        }
+        
+        // 顯示計算出的 MA 數值
+        function displayCalculatedMA(ma) {
+            const panel = document.getElementById('calculated-ma');
+            panel.classList.remove('hidden');
+            
+            document.getElementById('calc-sell-in-ma1').textContent = ma.sell_in_ma1.toLocaleString(undefined, {maximumFractionDigits: 0});
+            document.getElementById('calc-sell-in-ma2').textContent = ma.sell_in_ma2.toLocaleString(undefined, {maximumFractionDigits: 0});
+            document.getElementById('calc-sell-in-ma3').textContent = ma.sell_in_ma3.toLocaleString(undefined, {maximumFractionDigits: 0});
+            document.getElementById('calc-sell-out-ma1').textContent = ma.sell_out_ma1.toLocaleString(undefined, {maximumFractionDigits: 0});
+            document.getElementById('calc-sell-out-ma2').textContent = ma.sell_out_ma2.toLocaleString(undefined, {maximumFractionDigits: 0});
+            document.getElementById('calc-sell-out-ma3').textContent = ma.sell_out_ma3.toLocaleString(undefined, {maximumFractionDigits: 0});
+        }
+
+        // 顯示結果
+        function displayResults(result) {
+            const panel = document.getElementById('results-panel');
+            panel.classList.remove('hidden');
+            
+            // 銷售分析
+            document.getElementById('result-sell-in-avg').textContent = 
+                result.sales_analysis.sell_in_avg.toLocaleString(undefined, {maximumFractionDigits: 0});
+            document.getElementById('result-sell-out-avg').textContent = 
+                result.sales_analysis.sell_out_avg.toLocaleString(undefined, {maximumFractionDigits: 0});
+            document.getElementById('result-monthly-sales').textContent = 
+                result.sales_analysis.estimated_monthly_sales.toLocaleString(undefined, {maximumFractionDigits: 0});
+            
+            // 庫存需求
+            document.getElementById('result-rop').textContent = 
+                result.inventory_demand.rop.toLocaleString(undefined, {maximumFractionDigits: 0});
+            document.getElementById('result-available').textContent = 
+                result.inventory_demand.available_stock.toLocaleString(undefined, {maximumFractionDigits: 0});
+            document.getElementById('result-demand').textContent = 
+                result.inventory_demand.total_demand.toLocaleString(undefined, {maximumFractionDigits: 0});
+            
+            // 再製判斷
+            const decisionPanel = document.getElementById('production-decision');
+            const needProduction = result.production_decision.need_production;
+            decisionPanel.className = `rounded-lg p-4 ${needProduction ? 'bg-red-50' : 'bg-green-50'}`;
+            decisionPanel.querySelector('h3').className = `font-medium mb-2 ${needProduction ? 'text-red-800' : 'text-green-800'}`;
+            
+            document.getElementById('result-need-production').textContent = needProduction ? 'Y (需要)' : 'N (不需要)';
+            document.getElementById('result-need-production').className = 
+                `font-bold text-lg ${needProduction ? 'text-red-600' : 'text-green-600'}`;
+            document.getElementById('result-suggested-qty').textContent = 
+                result.production_decision.suggested_quantity.toLocaleString(undefined, {maximumFractionDigits: 0});
+            
+            // 庫存狀態
+            document.getElementById('result-current-months').textContent = 
+                result.inventory_status.current_available_months.toFixed(1) + ' 月';
+            document.getElementById('result-depletion-date').textContent = 
+                result.inventory_status.stock_depletion_date;
+            document.getElementById('result-planned-months').textContent = 
+                result.inventory_status.planned_available_months.toFixed(1) + ' 月';
+            document.getElementById('result-planned-date').textContent = 
+                result.inventory_status.planned_depletion_date;
+            
+            // 需求交期
+            const orderInfo = document.getElementById('order-info');
+            if (result.order_info.order_deadline) {
+                orderInfo.classList.remove('hidden');
+                document.getElementById('result-order-deadline').textContent = result.order_info.order_deadline;
+            } else {
+                orderInfo.classList.add('hidden');
+            }
+            
+            // 滾動到結果
+            panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    </script>
+</body>
+</html>

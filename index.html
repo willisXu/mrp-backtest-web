@@ -1,0 +1,1413 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <script src="bridge.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MRP 回測系統 - 參數調整與回測</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans TC', sans-serif; }
+        .formula-box { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+        }
+        .param-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+        }
+        .card-hover:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+        .loading-spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .metric-card {
+            transition: all 0.3s ease;
+        }
+        .metric-card:hover {
+            transform: scale(1.02);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-gray-800">MRP 生產預測回測系統</h1>
+                        <p class="text-sm text-gray-500">參數調整與回測分析</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <a href="demand-planning.html" class="bg-gradient-to-r from-green-500 to-teal-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:from-green-600 hover:to-teal-700 transition-all">
+                        需求計劃公式
+                    </a>
+                    <div id="data-info" class="text-sm text-gray-500">
+                        載入中...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- 左側：參數設定 -->
+            <div class="lg:col-span-1 space-y-6">
+                <!-- 回測設定 -->
+                <div class="bg-white rounded-xl shadow-sm p-6 card-hover transition-all duration-300">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                        <svg class="w-5 h-5 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                        </svg>
+                        回測設定
+                    </h2>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">通路選擇</label>
+                            <select id="channel-select" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                <option value="ALL">全部通路</option>
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">商品系列</label>
+                            <select id="series-select" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                <option value="ALL">全部系列</option>
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                                訓練期 (月)
+                                <span id="training-months-value" class="text-indigo-600 font-semibold ml-2">24</span>
+                            </label>
+                            <input type="range" id="training-months" min="12" max="36" value="24" step="1"
+                                   class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer param-slider">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                                預測期 (月)
+                                <span id="forecast-months-value" class="text-indigo-600 font-semibold ml-2">3</span>
+                            </label>
+                            <input type="range" id="forecast-months" min="1" max="6" value="3" step="1"
+                                   class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer param-slider">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                                滾動輪數
+                                <span id="rolling-rounds-value" class="text-indigo-600 font-semibold ml-2">12</span>
+                            </label>
+                            <input type="range" id="rolling-rounds" min="6" max="24" value="12" step="1"
+                                   class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer param-slider">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 預測方法選擇 -->
+                <div class="bg-white rounded-xl shadow-sm p-6 card-hover transition-all duration-300">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                        <svg class="w-5 h-5 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+                        </svg>
+                        預測方法
+                    </h2>
+                    
+                    <div class="space-y-2">
+                        <label class="flex items-center p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-indigo-50 transition-colors">
+                            <input type="radio" name="method" value="Naive" class="text-indigo-600 focus:ring-indigo-500">
+                            <span class="ml-3 text-sm font-medium text-gray-700">Naïve (天真法)</span>
+                        </label>
+                        <label class="flex items-center p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-indigo-50 transition-colors">
+                            <input type="radio" name="method" value="Seasonal_Naive" class="text-indigo-600 focus:ring-indigo-500">
+                            <span class="ml-3 text-sm font-medium text-gray-700">Seasonal Naïve (季節性天真法)</span>
+                        </label>
+                        <label class="flex items-center p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-indigo-50 transition-colors">
+                            <input type="radio" name="method" value="SMA" checked class="text-indigo-600 focus:ring-indigo-500">
+                            <span class="ml-3 text-sm font-medium text-gray-700">SMA (簡單移動平均)</span>
+                        </label>
+                        <label class="flex items-center p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-indigo-50 transition-colors">
+                            <input type="radio" name="method" value="SES" class="text-indigo-600 focus:ring-indigo-500">
+                            <span class="ml-3 text-sm font-medium text-gray-700">SES (簡單指數平滑)</span>
+                        </label>
+                        <label class="flex items-center p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-indigo-50 transition-colors">
+                            <input type="radio" name="method" value="Holt" class="text-indigo-600 focus:ring-indigo-500">
+                            <span class="ml-3 text-sm font-medium text-gray-700">Holt (雙參數指數平滑)</span>
+                        </label>
+                        <label class="flex items-center p-3 bg-indigo-50 rounded-lg cursor-pointer hover:bg-indigo-100 transition-colors border-2 border-indigo-200">
+                            <input type="radio" name="method" value="HoltWinters" class="text-indigo-600 focus:ring-indigo-500">
+                            <span class="ml-3 text-sm font-medium text-gray-700">Holt-Winters ⭐推薦</span>
+                        </label>
+                        <label class="flex items-center p-3 bg-green-50 rounded-lg cursor-pointer hover:bg-green-100 transition-colors border-2 border-green-200">
+                            <input type="radio" name="method" value="WeightedMA" class="text-green-600 focus:ring-green-500">
+                            <span class="ml-3 text-sm font-medium text-gray-700">加權移動平均 📋自訂公式</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- 方法參數 -->
+                <div id="method-params" class="bg-white rounded-xl shadow-sm p-6 card-hover transition-all duration-300">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                        <svg class="w-5 h-5 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path>
+                        </svg>
+                        方法參數
+                    </h2>
+                    <div id="params-container" class="space-y-4">
+                        <!-- 動態生成參數 -->
+                    </div>
+                </div>
+
+                <!-- 執行按鈕 -->
+                <div class="flex space-x-3">
+                    <button id="run-backtest" class="flex-1 bg-gradient-to-r from-indigo-500 to-purple-600 text-white py-3 px-6 rounded-lg font-medium hover:from-indigo-600 hover:to-purple-700 transition-all duration-300 flex items-center justify-center">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        執行回測
+                    </button>
+                    <button id="add-to-compare" class="bg-white border-2 border-green-500 text-green-600 py-3 px-4 rounded-lg font-medium hover:bg-green-50 transition-all duration-300" title="加入比較清單">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- 多組公式比較區 -->
+                <div id="formula-compare-section" class="bg-white rounded-xl shadow-sm p-6 card-hover transition-all duration-300">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-semibold text-gray-800 flex items-center">
+                            <svg class="w-5 h-5 mr-2 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"></path>
+                            </svg>
+                            多組公式比較
+                            <span id="formula-count" class="ml-2 bg-green-100 text-green-700 text-xs px-2 py-1 rounded-full">0 組</span>
+                        </h2>
+                        <div class="flex items-center space-x-2">
+                            <button id="add-new-formula" class="bg-green-500 text-white px-3 py-1 rounded-lg text-sm hover:bg-green-600 flex items-center">
+                                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                                </svg>
+                                新增公式
+                            </button>
+                            <button id="clear-formulas" class="text-red-500 hover:text-red-700 text-sm">清空</button>
+                        </div>
+                    </div>
+                    
+                    <div id="formula-list" class="space-y-3 max-h-[500px] overflow-y-auto mb-4">
+                        <p id="formula-empty-hint" class="text-gray-400 text-sm text-center py-4">點擊「新增公式」開始設定比較組合</p>
+                    </div>
+                    
+                    <button id="run-compare" class="w-full bg-gradient-to-r from-green-500 to-teal-600 text-white py-3 px-6 rounded-lg font-medium hover:from-green-600 hover:to-teal-700 transition-all duration-300 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                        </svg>
+                        執行多組比較
+                    </button>
+                </div>
+
+                <!-- 預設方法快速比較 -->
+                <div class="flex">
+                    <button id="compare-methods" class="w-full bg-white border-2 border-indigo-500 text-indigo-600 py-3 px-6 rounded-lg font-medium hover:bg-indigo-50 transition-all duration-300">
+                        快速比較預設方法
+                    </button>
+                </div>
+            </div>
+
+            <!-- 右側：結果顯示 -->
+            <div class="lg:col-span-2 space-y-6">
+                <!-- 公式說明 -->
+                <div id="formula-info" class="formula-box p-6 text-white">
+                    <h3 id="formula-name" class="text-xl font-bold mb-2">SMA (簡單移動平均)</h3>
+                    <div class="bg-white/20 rounded-lg p-4 mb-3">
+                        <code id="formula-text" class="text-lg font-mono">預測值 = (過去 N 期銷量加總) / N</code>
+                    </div>
+                    <p id="formula-desc" class="text-white/90 text-sm">對所有歷史數據權重相同，平滑短期波動</p>
+                    <p id="formula-suitable" class="text-white/70 text-xs mt-2">適用：需求波動小的成熟商品</p>
+                </div>
+
+                <!-- 回測結果指標 -->
+                <div id="results-metrics" class="grid grid-cols-2 md:grid-cols-3 gap-4 hidden">
+                    <div class="metric-card bg-white rounded-xl shadow-sm p-4 group relative">
+                        <div class="text-sm text-gray-500 mb-1 flex items-center">
+                            wMAPE
+                            <span class="ml-1 text-gray-400 cursor-help" title="加權平均絕對百分比誤差">ⓘ</span>
+                        </div>
+                        <div id="metric-wmape" class="text-2xl font-bold text-indigo-600">-</div>
+                        <div id="metric-wmape-hint" class="text-xs text-gray-500 mt-1">-</div>
+                        <div class="hidden group-hover:block absolute z-10 bg-gray-800 text-white text-xs rounded-lg p-3 w-64 -top-2 left-full ml-2 shadow-lg">
+                            <strong>wMAPE (加權平均絕對百分比誤差)</strong><br>
+                            以實際銷量加權的誤差指標，對高銷量月份更敏感。<br>
+                            <span class="text-green-300">• &lt;10%：優秀</span><br>
+                            <span class="text-yellow-300">• 10-20%：良好</span><br>
+                            <span class="text-orange-300">• 20-30%：可接受</span><br>
+                            <span class="text-red-300">• &gt;30%：需改善</span>
+                        </div>
+                    </div>
+                    <div class="metric-card bg-white rounded-xl shadow-sm p-4 group relative">
+                        <div class="text-sm text-gray-500 mb-1 flex items-center">
+                            MAPE
+                            <span class="ml-1 text-gray-400 cursor-help">ⓘ</span>
+                        </div>
+                        <div id="metric-mape" class="text-2xl font-bold text-purple-600">-</div>
+                        <div id="metric-mape-hint" class="text-xs text-gray-500 mt-1">-</div>
+                        <div class="hidden group-hover:block absolute z-10 bg-gray-800 text-white text-xs rounded-lg p-3 w-64 -top-2 left-full ml-2 shadow-lg">
+                            <strong>MAPE (平均絕對百分比誤差)</strong><br>
+                            每月誤差百分比的平均值，對所有月份權重相同。<br>
+                            <span class="text-green-300">• &lt;10%：高準確度</span><br>
+                            <span class="text-yellow-300">• 10-20%：良好預測</span><br>
+                            <span class="text-orange-300">• 20-50%：合理預測</span><br>
+                            <span class="text-red-300">• &gt;50%：不準確</span>
+                        </div>
+                    </div>
+                    <div class="metric-card bg-white rounded-xl shadow-sm p-4 group relative">
+                        <div class="text-sm text-gray-500 mb-1 flex items-center">
+                            Bias
+                            <span class="ml-1 text-gray-400 cursor-help">ⓘ</span>
+                        </div>
+                        <div id="metric-bias" class="text-2xl font-bold text-pink-600">-</div>
+                        <div id="metric-bias-hint" class="text-xs text-gray-500 mt-1">-</div>
+                        <div class="hidden group-hover:block absolute z-10 bg-gray-800 text-white text-xs rounded-lg p-3 w-64 -top-2 left-full ml-2 shadow-lg">
+                            <strong>Bias (預測偏差)</strong><br>
+                            正值=預測偏高(過度樂觀)，負值=預測偏低(過度保守)。<br>
+                            <span class="text-green-300">• ±5%內：無明顯偏差</span><br>
+                            <span class="text-yellow-300">• ±5-15%：輕微偏差</span><br>
+                            <span class="text-red-300">• &gt;±15%：系統性偏差</span><br>
+                            理想值接近 0%
+                        </div>
+                    </div>
+                    <div class="metric-card bg-white rounded-xl shadow-sm p-4 group relative">
+                        <div class="text-sm text-gray-500 mb-1 flex items-center">
+                            RMSE
+                            <span class="ml-1 text-gray-400 cursor-help">ⓘ</span>
+                        </div>
+                        <div id="metric-rmse" class="text-2xl font-bold text-blue-600">-</div>
+                        <div id="metric-rmse-hint" class="text-xs text-gray-500 mt-1">-</div>
+                        <div class="hidden group-hover:block absolute z-10 bg-gray-800 text-white text-xs rounded-lg p-3 w-64 -top-2 left-full ml-2 shadow-lg">
+                            <strong>RMSE (均方根誤差)</strong><br>
+                            預測誤差的標準差，單位與銷量相同。<br>
+                            對大誤差更敏感，適合評估極端情況。<br>
+                            數值越小越好，可與平均銷量比較判斷。
+                        </div>
+                    </div>
+                    <div class="metric-card bg-white rounded-xl shadow-sm p-4 group relative">
+                        <div class="text-sm text-gray-500 mb-1 flex items-center">
+                            ±10% 準確率
+                            <span class="ml-1 text-gray-400 cursor-help">ⓘ</span>
+                        </div>
+                        <div id="metric-acc10" class="text-2xl font-bold text-green-600">-</div>
+                        <div id="metric-acc10-hint" class="text-xs text-gray-500 mt-1">-</div>
+                        <div class="hidden group-hover:block absolute z-10 bg-gray-800 text-white text-xs rounded-lg p-3 w-64 -top-2 left-full ml-2 shadow-lg">
+                            <strong>±10% 準確率</strong><br>
+                            預測值落在實際值 ±10% 範圍內的比例。<br>
+                            <span class="text-green-300">• &gt;70%：優秀</span><br>
+                            <span class="text-yellow-300">• 50-70%：良好</span><br>
+                            <span class="text-orange-300">• 30-50%：可接受</span><br>
+                            <span class="text-red-300">• &lt;30%：需改善</span>
+                        </div>
+                    </div>
+                    <div class="metric-card bg-white rounded-xl shadow-sm p-4 group relative">
+                        <div class="text-sm text-gray-500 mb-1 flex items-center">
+                            ±20% 準確率
+                            <span class="ml-1 text-gray-400 cursor-help">ⓘ</span>
+                        </div>
+                        <div id="metric-acc20" class="text-2xl font-bold text-teal-600">-</div>
+                        <div id="metric-acc20-hint" class="text-xs text-gray-500 mt-1">-</div>
+                        <div class="hidden group-hover:block absolute z-10 bg-gray-800 text-white text-xs rounded-lg p-3 w-64 -top-2 left-full ml-2 shadow-lg">
+                            <strong>±20% 準確率</strong><br>
+                            預測值落在實際值 ±20% 範圍內的比例。<br>
+                            <span class="text-green-300">• &gt;80%：優秀</span><br>
+                            <span class="text-yellow-300">• 60-80%：良好</span><br>
+                            <span class="text-orange-300">• 40-60%：可接受</span><br>
+                            <span class="text-red-300">• &lt;40%：需改善</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 圖表區域 -->
+                <div class="bg-white rounded-xl shadow-sm p-6">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-4">預測 vs 實際</h3>
+                    <div class="h-80">
+                        <canvas id="forecast-chart"></canvas>
+                    </div>
+                </div>
+
+                <!-- 方法比較表 -->
+                <div id="comparison-table" class="bg-white rounded-xl shadow-sm p-6 hidden">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-4">方法比較結果</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="bg-gray-50">
+                                    <th class="px-4 py-3 text-left font-semibold text-gray-700">排名</th>
+                                    <th class="px-4 py-3 text-left font-semibold text-gray-700">方法</th>
+                                    <th class="px-4 py-3 text-right font-semibold text-gray-700">wMAPE</th>
+                                    <th class="px-4 py-3 text-right font-semibold text-gray-700">MAPE</th>
+                                    <th class="px-4 py-3 text-right font-semibold text-gray-700">Bias</th>
+                                    <th class="px-4 py-3 text-right font-semibold text-gray-700">±20%準確</th>
+                                </tr>
+                            </thead>
+                            <tbody id="comparison-tbody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 回測輪次明細 -->
+                <div id="round-details" class="bg-white rounded-xl shadow-sm p-6 hidden">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-4">回測輪次明細</h3>
+                    <div class="overflow-x-auto max-h-64">
+                        <table class="w-full text-sm">
+                            <thead class="sticky top-0 bg-white">
+                                <tr class="bg-gray-50">
+                                    <th class="px-3 py-2 text-left font-semibold text-gray-700">輪次</th>
+                                    <th class="px-3 py-2 text-left font-semibold text-gray-700">訓練截止</th>
+                                    <th class="px-3 py-2 text-left font-semibold text-gray-700">測試期間</th>
+                                    <th class="px-3 py-2 text-right font-semibold text-gray-700">wMAPE</th>
+                                    <th class="px-3 py-2 text-right font-semibold text-gray-700">Bias</th>
+                                </tr>
+                            </thead>
+                            <tbody id="round-tbody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-xl p-8 flex flex-col items-center">
+            <div class="loading-spinner mb-4"></div>
+            <p class="text-gray-600">執行回測中...</p>
+        </div>
+    </div>
+
+    <!-- 公式參數設定彈窗 -->
+    <div id="formula-modal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-hidden">
+            <!-- 彈窗標題 -->
+            <div class="bg-gradient-to-r from-green-500 to-teal-600 text-white px-6 py-4 flex items-center justify-between">
+                <h3 id="modal-title" class="text-lg font-bold flex items-center">
+                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                    </svg>
+                    公式參數設定
+                </h3>
+                <button onclick="closeFormulaModal()" class="text-white/80 hover:text-white p-1">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            
+            <!-- 彈窗內容 -->
+            <div class="p-6 overflow-y-auto max-h-[60vh]">
+                <!-- 方法選擇 -->
+                <div class="mb-5">
+                    <label class="block text-sm font-semibold text-gray-700 mb-2">📊 預測方法</label>
+                    <select id="modal-method-select" onchange="onModalMethodChange()" 
+                            class="w-full px-4 py-3 text-base border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white">
+                    </select>
+                </div>
+                
+                <!-- 參數設定區 -->
+                <div class="mb-4">
+                    <label class="block text-sm font-semibold text-gray-700 mb-2">⚙️ 參數設定</label>
+                    <div id="modal-params-container" class="bg-gray-50 rounded-xl p-4 space-y-4">
+                        <!-- 動態生成參數控制項 -->
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 彈窗底部按鈕 -->
+            <div class="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end space-x-3">
+                <button onclick="closeFormulaModal()" class="px-5 py-2.5 text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 font-medium">
+                    取消
+                </button>
+                <button onclick="saveFormulaModal()" class="px-5 py-2.5 text-white bg-gradient-to-r from-green-500 to-teal-600 rounded-lg hover:from-green-600 hover:to-teal-700 font-medium">
+                    確定
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全域變數
+        let formulaInfo = {};
+        let forecastChart = null;
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                await loadDataInfo();
+                await loadFormulaInfo();
+                setupEventListeners();
+                updateMethodParams();
+            } catch (e) {
+                console.error('初始化錯誤:', e);
+            }
+        });
+
+        // 載入數據資訊
+        async function loadDataInfo() {
+            try {
+                const response = await fetch('/api/data/info');
+                const data = await response.json();
+                
+                // 載入通路選單
+                if (data.channels) {
+                    const channelSelect = document.getElementById('channel-select');
+                    const channelNames = data.channel_names || {};
+                    channelSelect.innerHTML = data.channels.map(ch => 
+                        `<option value="${ch}">${channelNames[ch] || ch}</option>`
+                    ).join('');
+                }
+                
+                // 載入系列選單
+                if (data.series) {
+                    const seriesSelect = document.getElementById('series-select');
+                    seriesSelect.innerHTML = data.series.map(s => 
+                        `<option value="${s.key}">${s.name}</option>`
+                    ).join('');
+                }
+                
+                document.getElementById('data-info').textContent = 
+                    `數據: ${data.year_range[0]}-${data.year_range[1]} | 記錄: ${data.total_records?.toLocaleString() || '-'}`;
+            } catch (e) {
+                console.error('載入數據資訊失敗:', e);
+            }
+        }
+
+        // 載入公式資訊
+        async function loadFormulaInfo() {
+            try {
+                const response = await fetch('/api/formula/info');
+                formulaInfo = await response.json();
+            } catch (e) {
+                console.error('載入公式資訊失敗:', e);
+            }
+        }
+
+        // 多組公式比較清單
+        let formulaCompareList = [];
+        
+        // 彈窗狀態
+        let currentEditingFormulaId = null;
+        let modalTempParams = {};
+
+        // 設定事件監聽器
+        function setupEventListeners() {
+            // 滑桿值更新
+            ['training-months', 'forecast-months', 'rolling-rounds'].forEach(id => {
+                const slider = document.getElementById(id);
+                const valueSpan = document.getElementById(`${id}-value`);
+                if (slider && valueSpan) {
+                    slider.addEventListener('input', () => valueSpan.textContent = slider.value);
+                }
+            });
+
+            // 方法選擇變更
+            document.querySelectorAll('input[name="method"]').forEach(radio => {
+                radio.addEventListener('change', updateMethodParams);
+            });
+
+            // 按鈕事件綁定
+            document.getElementById('run-backtest')?.addEventListener('click', runBacktest);
+            document.getElementById('compare-methods')?.addEventListener('click', compareMethods);
+            document.getElementById('add-to-compare')?.addEventListener('click', addCurrentToCompareList);
+            document.getElementById('add-new-formula')?.addEventListener('click', openNewFormulaModal);
+            document.getElementById('clear-formulas')?.addEventListener('click', clearCompareList);
+            document.getElementById('run-compare')?.addEventListener('click', runMultiCompare);
+        }
+        
+        // 使用當前設定加入比較清單
+        function addCurrentToCompareList() {
+            const method = document.querySelector('input[name="method"]:checked').value;
+            const params = getCurrentParams();
+            addFormulaToList(method, params);
+        }
+        
+        // 開啟新增公式彈窗
+        function openNewFormulaModal() {
+            currentEditingFormulaId = null; // 新增模式
+            modalTempParams = {};
+            
+            // 初始化彈窗方法選單
+            const methodSelect = document.getElementById('modal-method-select');
+            methodSelect.innerHTML = Object.keys(formulaInfo).map(key => {
+                const info = formulaInfo[key];
+                return `<option value="${key}">${info.name}</option>`;
+            }).join('');
+            
+            // 預設選擇 SMA
+            methodSelect.value = 'SMA';
+            onModalMethodChange();
+            
+            // 顯示彈窗
+            document.getElementById('modal-title').innerHTML = `
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                </svg>
+                新增公式
+            `;
+            document.getElementById('formula-modal').classList.remove('hidden');
+        }
+        
+        // 開啟編輯公式彈窗
+        function openEditFormulaModal(id) {
+            const item = formulaCompareList.find(f => f.id === id);
+            if (!item) return;
+            
+            currentEditingFormulaId = id;
+            modalTempParams = { ...item.params };
+            
+            // 初始化彈窗方法選單
+            const methodSelect = document.getElementById('modal-method-select');
+            methodSelect.innerHTML = Object.keys(formulaInfo).map(key => {
+                const info = formulaInfo[key];
+                return `<option value="${key}" ${key === item.method ? 'selected' : ''}>${info.name}</option>`;
+            }).join('');
+            
+            // 載入參數
+            onModalMethodChange();
+            
+            // 顯示彈窗
+            document.getElementById('modal-title').innerHTML = `
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                </svg>
+                編輯公式參數
+            `;
+            document.getElementById('formula-modal').classList.remove('hidden');
+        }
+        
+        // 關閉彈窗
+        function closeFormulaModal() {
+            document.getElementById('formula-modal').classList.add('hidden');
+            currentEditingFormulaId = null;
+            modalTempParams = {};
+        }
+        
+        // 彈窗方法變更
+        function onModalMethodChange() {
+            const method = document.getElementById('modal-method-select').value;
+            const info = formulaInfo[method];
+            const container = document.getElementById('modal-params-container');
+            
+            // 如果是編輯模式且方法相同，使用已存的參數
+            let params = {};
+            if (currentEditingFormulaId !== null) {
+                const item = formulaCompareList.find(f => f.id === currentEditingFormulaId);
+                if (item && item.method === method) {
+                    params = { ...item.params };
+                }
+            }
+            
+            // 合併暫存參數
+            if (modalTempParams && Object.keys(modalTempParams).length > 0) {
+                const prevMethod = document.getElementById('modal-method-select').dataset.prevMethod;
+                if (prevMethod === method) {
+                    params = { ...modalTempParams };
+                }
+            }
+            
+            // 記錄當前方法
+            document.getElementById('modal-method-select').dataset.prevMethod = method;
+            
+            if (!info || !info.params || info.params.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 text-sm text-center py-2">此方法無需額外參數</p>';
+                modalTempParams = {};
+                return;
+            }
+            
+            // 初始化參數
+            modalTempParams = {};
+            info.params.forEach(p => {
+                if (params[p.name] !== undefined) {
+                    modalTempParams[p.name] = params[p.name];
+                } else {
+                    modalTempParams[p.name] = p.default;
+                }
+            });
+            
+            // 生成參數控制項
+            container.innerHTML = info.params.map(param => {
+                const value = modalTempParams[param.name];
+                
+                if (param.options) {
+                    return `
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">${param.label}</label>
+                            <select onchange="updateModalParam('${param.name}', this.value)" 
+                                    class="w-full px-3 py-2 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white">
+                                ${param.options.map(opt => 
+                                    `<option value="${opt}" ${opt === value ? 'selected' : ''}>${opt === 'add' ? '加法模型' : '乘法模型'}</option>`
+                                ).join('')}
+                            </select>
+                        </div>
+                    `;
+                } else if (param.type === 'checkbox') {
+                    return `
+                        <div class="flex items-center p-3 bg-white rounded-lg border border-gray-200">
+                            <input type="checkbox" id="modal-param-${param.name}" ${value ? 'checked' : ''}
+                                   onchange="updateModalParam('${param.name}', this.checked)"
+                                   class="w-5 h-5 text-green-600 border-gray-300 rounded focus:ring-green-500">
+                            <label for="modal-param-${param.name}" class="ml-3 text-sm font-medium text-gray-700">${param.label}</label>
+                        </div>
+                    `;
+                } else {
+                    return `
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <label class="text-sm font-medium text-gray-700">${param.label}</label>
+                                <span id="modal-param-${param.name}-val" class="text-sm text-green-600 font-bold bg-green-100 px-3 py-1 rounded-full">${value}</span>
+                            </div>
+                            <input type="range" min="${param.min}" max="${param.max}" value="${value}" step="${param.step}"
+                                   onchange="updateModalParam('${param.name}', parseFloat(this.value)); document.getElementById('modal-param-${param.name}-val').textContent = this.value;"
+                                   oninput="document.getElementById('modal-param-${param.name}-val').textContent = this.value;"
+                                   class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-green-500">
+                        </div>
+                    `;
+                }
+            }).join('');
+        }
+        
+        // 更新彈窗參數
+        function updateModalParam(paramName, value) {
+            const method = document.getElementById('modal-method-select').value;
+            const info = formulaInfo[method];
+            if (info && info.params) {
+                const paramDef = info.params.find(p => p.name === paramName);
+                if (paramDef) {
+                    if (paramDef.type === 'checkbox') {
+                        value = Boolean(value);
+                    } else if (paramDef.step && paramDef.step >= 1) {
+                        value = parseInt(value);
+                    } else if (!paramDef.options) {
+                        value = parseFloat(value);
+                    }
+                }
+            }
+            modalTempParams[paramName] = value;
+        }
+        
+        // 儲存彈窗設定
+        function saveFormulaModal() {
+            const method = document.getElementById('modal-method-select').value;
+            
+            if (currentEditingFormulaId === null) {
+                // 新增模式
+                const id = Date.now();
+                const formulaItem = {
+                    id: id,
+                    method: method,
+                    params: { ...modalTempParams }
+                };
+                formulaCompareList.push(formulaItem);
+            } else {
+                // 編輯模式
+                const item = formulaCompareList.find(f => f.id === currentEditingFormulaId);
+                if (item) {
+                    item.method = method;
+                    item.params = { ...modalTempParams };
+                }
+            }
+            
+            updateFormulaListUI();
+            closeFormulaModal();
+        }
+        
+        // 加入公式到清單
+        function addFormulaToList(method, params) {
+            const formulaItem = {
+                id: Date.now(),
+                method: method,
+                params: { ...params },
+                expanded: false
+            };
+            
+            formulaCompareList.push(formulaItem);
+            updateFormulaListUI();
+        }
+        
+        // 取得公式顯示名稱
+        function getFormulaDisplayName(method, params) {
+            const info = formulaInfo[method];
+            let name = info ? info.name.split(' ')[0] : method;
+            
+            // 根據方法加入參數說明
+            if (method === 'SMA') {
+                name += ` (window=${params.window || 3})`;
+            } else if (method === 'SES') {
+                name += ` (α=${params.alpha || 0.2})`;
+            } else if (method === 'Holt') {
+                name += ` (α=${params.alpha || 0.2}, β=${params.beta || 0.1})`;
+            } else if (method === 'HoltWinters') {
+                name += ` (${params.seasonal_type || 'add'})`;
+            } else if (method === 'WeightedMA') {
+                const w = params.sell_in_weight !== undefined ? params.sell_in_weight : 0.7;
+                name += ` (MA${params.ma_period_1 || 12}-${params.ma_period_2 || 6}-${params.ma_period_3 || 3}, SI:${w})`;
+            } else if (method === 'Seasonal_Naive') {
+                name += ` (period=${params.seasonal_period || 12})`;
+            }
+            
+            return name;
+        }
+        
+        // 取得公式參數摘要（用於卡片副標題）
+        function getFormulaParamsSummary(method, params) {
+            const info = formulaInfo[method];
+            if (!info || !info.params || info.params.length === 0) {
+                return '無額外參數';
+            }
+            
+            const summaryParts = [];
+            info.params.forEach(param => {
+                const value = params[param.name] !== undefined ? params[param.name] : param.default;
+                if (param.type === 'checkbox') {
+                    if (value) summaryParts.push(`✓ ${param.label.substring(0, 10)}`);
+                } else if (param.options) {
+                    summaryParts.push(`${value === 'add' ? '加法' : '乘法'}`);
+                } else {
+                    // 縮短標籤
+                    let shortLabel = param.label.replace(/\s*\(.*\)/, '').substring(0, 6);
+                    summaryParts.push(`${shortLabel}=${value}`);
+                }
+            });
+            
+            return summaryParts.slice(0, 4).join(' | ') + (summaryParts.length > 4 ? ' ...' : '');
+        }
+        
+        // 生成公式卡片的參數 HTML
+        function generateFormulaParamsHTML(id, method, params) {
+            const info = formulaInfo[method];
+            if (!info || !info.params || info.params.length === 0) {
+                return '<p class="text-gray-500 text-xs">此方法無需額外參數</p>';
+            }
+            
+            // 將參數分組顯示（針對 WeightedMA 等多參數公式）
+            const paramGroups = [];
+            let currentGroup = [];
+            
+            info.params.forEach((param, idx) => {
+                currentGroup.push(param);
+                // 每 3 個滑桿參數或遇到 checkbox/select 時分組
+                if (param.type === 'checkbox' || param.options || currentGroup.length >= 3) {
+                    paramGroups.push([...currentGroup]);
+                    currentGroup = [];
+                }
+            });
+            if (currentGroup.length > 0) {
+                paramGroups.push(currentGroup);
+            }
+            
+            return paramGroups.map(group => {
+                const groupHTML = group.map(param => {
+                    const value = params[param.name] !== undefined ? params[param.name] : param.default;
+                    
+                    if (param.options) {
+                        return `
+                            <div class="mb-3">
+                                <label class="block text-xs font-medium text-gray-600 mb-1">${param.label}</label>
+                                <select onchange="updateFormulaParam(${id}, '${param.name}', this.value)" 
+                                        class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 bg-white">
+                                    ${param.options.map(opt => 
+                                        `<option value="${opt}" ${opt === value ? 'selected' : ''}>${opt === 'add' ? '加法模型' : '乘法模型'}</option>`
+                                    ).join('')}
+                                </select>
+                            </div>
+                        `;
+                    } else if (param.type === 'checkbox') {
+                        return `
+                            <div class="flex items-center p-2 bg-gray-50 rounded-lg mb-3">
+                                <input type="checkbox" id="formula-${id}-${param.name}" ${value ? 'checked' : ''}
+                                       onchange="updateFormulaParam(${id}, '${param.name}', this.checked)"
+                                       class="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500">
+                                <label for="formula-${id}-${param.name}" class="ml-2 text-xs font-medium text-gray-700">${param.label}</label>
+                            </div>
+                        `;
+                    } else {
+                        return `
+                            <div class="mb-3">
+                                <div class="flex justify-between items-center mb-1">
+                                    <label class="text-xs font-medium text-gray-600">${param.label}</label>
+                                    <span id="formula-${id}-${param.name}-val" class="text-sm text-green-600 font-bold bg-green-50 px-2 py-0.5 rounded">${value}</span>
+                                </div>
+                                <input type="range" min="${param.min}" max="${param.max}" value="${value}" step="${param.step}"
+                                       onchange="updateFormulaParam(${id}, '${param.name}', parseFloat(this.value)); document.getElementById('formula-${id}-${param.name}-val').textContent = this.value;"
+                                       oninput="document.getElementById('formula-${id}-${param.name}-val').textContent = this.value;"
+                                       class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-green-500">
+                            </div>
+                        `;
+                    }
+                }).join('');
+                
+                // 如果是多個滑桿參數，用網格佈局
+                if (group.length > 1 && group.every(p => !p.options && p.type !== 'checkbox')) {
+                    return `<div class="grid grid-cols-${Math.min(group.length, 3)} gap-2">${groupHTML}</div>`;
+                }
+                return groupHTML;
+            }).join('');
+        }
+        
+        // 更新公式參數
+        function updateFormulaParam(id, paramName, value) {
+            const item = formulaCompareList.find(f => f.id === id);
+            if (item) {
+                // 根據參數類型轉換值
+                const info = formulaInfo[item.method];
+                if (info && info.params) {
+                    const paramDef = info.params.find(p => p.name === paramName);
+                    if (paramDef) {
+                        if (paramDef.type === 'checkbox') {
+                            value = Boolean(value);
+                        } else if (paramDef.step && paramDef.step >= 1) {
+                            value = parseInt(value);
+                        } else if (!paramDef.options) {
+                            value = parseFloat(value);
+                        }
+                    }
+                }
+                item.params[paramName] = value;
+                // 更新卡片標題
+                const titleEl = document.getElementById(`formula-title-${id}`);
+                if (titleEl) {
+                    titleEl.textContent = getFormulaDisplayName(item.method, item.params);
+                }
+            }
+        }
+        
+        // 更新公式方法
+        function updateFormulaMethod(id, method) {
+            const item = formulaCompareList.find(f => f.id === id);
+            if (item) {
+                item.method = method;
+                // 重設參數為預設值
+                const info = formulaInfo[method];
+                item.params = {};
+                if (info && info.params) {
+                    info.params.forEach(p => {
+                        // 確保參數類型正確
+                        if (p.type === 'checkbox') {
+                            item.params[p.name] = Boolean(p.default);
+                        } else if (p.step && p.step >= 1) {
+                            item.params[p.name] = parseInt(p.default);
+                        } else if (p.options) {
+                            item.params[p.name] = p.default;
+                        } else {
+                            item.params[p.name] = parseFloat(p.default);
+                        }
+                    });
+                }
+                // 重新渲染參數區
+                const paramsContainer = document.getElementById(`formula-params-${id}`);
+                if (paramsContainer) {
+                    paramsContainer.innerHTML = generateFormulaParamsHTML(id, method, item.params);
+                }
+                // 更新標題
+                const titleEl = document.getElementById(`formula-title-${id}`);
+                if (titleEl) {
+                    titleEl.textContent = getFormulaDisplayName(method, item.params);
+                }
+            }
+        }
+        
+        // 更新公式清單 UI（簡潔卡片模式，點擊打開彈窗編輯）
+        function updateFormulaListUI() {
+            const container = document.getElementById('formula-list');
+            const countSpan = document.getElementById('formula-count');
+            const runBtn = document.getElementById('run-compare');
+            
+            countSpan.textContent = `${formulaCompareList.length} 組`;
+            runBtn.disabled = formulaCompareList.length < 2;
+            
+            if (formulaCompareList.length === 0) {
+                container.innerHTML = '<p id="formula-empty-hint" class="text-gray-400 text-sm text-center py-4">點擊「新增公式」開始設定比較組合</p>';
+                return;
+            }
+            
+            container.innerHTML = formulaCompareList.map((item, index) => `
+                <div id="formula-card-${item.id}" class="group border border-gray-200 rounded-xl overflow-hidden bg-white hover:border-green-400 hover:shadow-md transition-all duration-200 cursor-pointer" onclick="openEditFormulaModal(${item.id})">
+                    <div class="flex items-center justify-between p-4">
+                        <div class="flex items-center flex-1 min-w-0">
+                            <span class="w-8 h-8 bg-gradient-to-br from-green-500 to-teal-600 text-white text-sm rounded-full flex items-center justify-center mr-3 font-bold shadow-sm flex-shrink-0">${index + 1}</span>
+                            <div class="min-w-0 flex-1">
+                                <div id="formula-title-${item.id}" class="text-sm font-semibold text-gray-800 truncate">${getFormulaDisplayName(item.method, item.params)}</div>
+                                <div class="text-xs text-gray-500 mt-0.5">${getFormulaParamsSummary(item.method, item.params)}</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-2 ml-3 flex-shrink-0">
+                            <button onclick="event.stopPropagation(); openEditFormulaModal(${item.id})" class="text-gray-400 hover:text-green-600 p-1.5 rounded-lg hover:bg-green-50 transition-colors" title="編輯參數">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                </svg>
+                            </button>
+                            <button onclick="event.stopPropagation(); removeFromCompareList(${item.id})" class="text-gray-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-colors" title="移除">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        // 從比較清單移除
+        function removeFromCompareList(id) {
+            formulaCompareList = formulaCompareList.filter(item => item.id !== id);
+            updateFormulaListUI();
+        }
+        
+        // 清空比較清單
+        function clearCompareList() {
+            formulaCompareList = [];
+            updateFormulaListUI();
+        }
+        
+        // 執行多組比較
+        async function runMultiCompare() {
+            if (formulaCompareList.length < 2) {
+                alert('請至少加入 2 組公式進行比較');
+                return;
+            }
+            
+            const channel = document.getElementById('channel-select').value;
+            const backtestConfig = {
+                training_months: parseInt(document.getElementById('training-months').value),
+                forecast_months: parseInt(document.getElementById('forecast-months').value),
+                rolling_rounds: parseInt(document.getElementById('rolling-rounds').value)
+            };
+            
+            const series = document.getElementById('series-select').value;
+            const methods = formulaCompareList.map(item => ({
+                method: item.method,
+                params: item.params
+            }));
+            
+            showLoading(true);
+            
+            try {
+                const response = await fetch('/api/backtest/compare', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel, series, methods, backtest_config: backtestConfig })
+                });
+                
+                const result = await response.json();
+                displayComparison(result);
+            } catch (e) {
+                console.error('多組比較失敗:', e);
+                alert('多組比較執行失敗');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // 更新方法參數
+        function updateMethodParams() {
+            const method = document.querySelector('input[name="method"]:checked').value;
+            const info = formulaInfo[method];
+            
+            if (info) {
+                document.getElementById('formula-name').textContent = info.name;
+                document.getElementById('formula-text').textContent = info.formula;
+                document.getElementById('formula-desc').textContent = info.description;
+                document.getElementById('formula-suitable').textContent = `適用：${info.suitable_for}`;
+                
+                // 生成參數控制項
+                const container = document.getElementById('params-container');
+                if (info.params && info.params.length > 0) {
+                    container.innerHTML = info.params.map(param => {
+                        if (param.options) {
+                            return `
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">${param.label}</label>
+                                    <select id="param-${param.name}" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                                        ${param.options.map(opt => 
+                                            `<option value="${opt}" ${opt === param.default ? 'selected' : ''}>${opt === 'add' ? '加法模型' : '乘法模型'}</option>`
+                                        ).join('')}
+                                    </select>
+                                </div>
+                            `;
+                        } else if (param.type === 'checkbox') {
+                            return `
+                                <div class="flex items-center p-3 bg-gray-50 rounded-lg">
+                                    <input type="checkbox" id="param-${param.name}" ${param.default ? 'checked' : ''}
+                                           class="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500">
+                                    <label for="param-${param.name}" class="ml-3 text-sm font-medium text-gray-700">${param.label}</label>
+                                </div>
+                            `;
+                        } else {
+                            return `
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">
+                                        ${param.label}
+                                        <span id="param-${param.name}-value" class="text-indigo-600 font-semibold ml-2">${param.default}</span>
+                                    </label>
+                                    <input type="range" id="param-${param.name}" 
+                                           min="${param.min}" max="${param.max}" value="${param.default}" step="${param.step}"
+                                           class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer param-slider">
+                                </div>
+                            `;
+                        }
+                    }).join('');
+                    
+                    // 綁定滑桿事件
+                    info.params.forEach(param => {
+                        if (!param.options) {
+                            const slider = document.getElementById(`param-${param.name}`);
+                            const valueSpan = document.getElementById(`param-${param.name}-value`);
+                            if (slider && valueSpan) {
+                                slider.addEventListener('input', () => {
+                                    valueSpan.textContent = slider.value;
+                                });
+                            }
+                        }
+                    });
+                } else {
+                    container.innerHTML = '<p class="text-gray-500 text-sm">此方法無需額外參數</p>';
+                }
+            }
+        }
+
+        // 取得當前參數
+        function getCurrentParams() {
+            const method = document.querySelector('input[name="method"]:checked').value;
+            const info = formulaInfo[method];
+            const params = {};
+            
+            if (info && info.params) {
+                info.params.forEach(param => {
+                    const el = document.getElementById(`param-${param.name}`);
+                    if (el) {
+                        if (param.type === 'checkbox') {
+                            params[param.name] = el.checked;
+                        } else if (param.options) {
+                            params[param.name] = el.value;
+                        } else {
+                            params[param.name] = parseFloat(el.value);
+                        }
+                    }
+                });
+            }
+            
+            return params;
+        }
+
+        // 執行回測
+        async function runBacktest() {
+            const method = document.querySelector('input[name="method"]:checked').value;
+            const params = getCurrentParams();
+            const channel = document.getElementById('channel-select').value;
+            const series = document.getElementById('series-select').value;
+            const backtestConfig = {
+                training_months: parseInt(document.getElementById('training-months').value),
+                forecast_months: parseInt(document.getElementById('forecast-months').value),
+                rolling_rounds: parseInt(document.getElementById('rolling-rounds').value)
+            };
+            
+            showLoading(true);
+            
+            try {
+                const response = await fetch('/api/backtest/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel, series, method, params, backtest_config: backtestConfig })
+                });
+                
+                const result = await response.json();
+                
+                if (result.error) {
+                    alert(result.error);
+                } else {
+                    displayResults(result);
+                }
+            } catch (e) {
+                console.error('回測失敗:', e);
+                alert('回測執行失敗');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // 比較全部方法
+        async function compareMethods() {
+            const channel = document.getElementById('channel-select').value;
+            const series = document.getElementById('series-select').value;
+            const backtestConfig = {
+                training_months: parseInt(document.getElementById('training-months').value),
+                forecast_months: parseInt(document.getElementById('forecast-months').value),
+                rolling_rounds: parseInt(document.getElementById('rolling-rounds').value)
+            };
+            
+            const methods = [
+                { method: 'Naive', params: {} },
+                { method: 'Seasonal_Naive', params: { seasonal_period: 12 } },
+                { method: 'SMA', params: { window: 3 } },
+                { method: 'SMA', params: { window: 6 } },
+                { method: 'SMA', params: { window: 12 } },
+                { method: 'SES', params: { alpha: 0.2 } },
+                { method: 'SES', params: { alpha: 0.3 } },
+                { method: 'Holt', params: { alpha: 0.2, beta: 0.1 } },
+                { method: 'HoltWinters', params: { alpha: 0.2, beta: 0.1, gamma: 0.2, seasonal_periods: 12, seasonal_type: 'add' } },
+                { method: 'HoltWinters', params: { alpha: 0.2, beta: 0.1, gamma: 0.2, seasonal_periods: 12, seasonal_type: 'mul' } },
+                { method: 'WeightedMA', params: { ma_period_1: 12, ma_period_2: 6, ma_period_3: 3, sell_in_weight: 0.7, sell_out_weight: 0.3, use_sell_in_as_sell_out: true } }
+            ];
+            
+            showLoading(true);
+            
+            try {
+                const response = await fetch('/api/backtest/compare', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel, series, methods, backtest_config: backtestConfig })
+                });
+                
+                const result = await response.json();
+                displayComparison(result);
+            } catch (e) {
+                console.error('比較失敗:', e);
+                alert('方法比較失敗');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // 取得數值評估等級
+        function getMetricRating(metric, value) {
+            const ratings = {
+                wmape: [
+                    { max: 0.10, text: '優秀', color: 'text-green-600' },
+                    { max: 0.20, text: '良好', color: 'text-yellow-600' },
+                    { max: 0.30, text: '可接受', color: 'text-orange-600' },
+                    { max: Infinity, text: '需改善', color: 'text-red-600' }
+                ],
+                mape: [
+                    { max: 0.10, text: '高準確度', color: 'text-green-600' },
+                    { max: 0.20, text: '良好預測', color: 'text-yellow-600' },
+                    { max: 0.50, text: '合理預測', color: 'text-orange-600' },
+                    { max: Infinity, text: '不準確', color: 'text-red-600' }
+                ],
+                bias: [
+                    { max: 0.05, text: '無明顯偏差', color: 'text-green-600' },
+                    { max: 0.15, text: '輕微偏差', color: 'text-yellow-600' },
+                    { max: Infinity, text: '系統性偏差', color: 'text-red-600' }
+                ],
+                acc10: [
+                    { min: 0.70, text: '優秀', color: 'text-green-600' },
+                    { min: 0.50, text: '良好', color: 'text-yellow-600' },
+                    { min: 0.30, text: '可接受', color: 'text-orange-600' },
+                    { min: 0, text: '需改善', color: 'text-red-600' }
+                ],
+                acc20: [
+                    { min: 0.80, text: '優秀', color: 'text-green-600' },
+                    { min: 0.60, text: '良好', color: 'text-yellow-600' },
+                    { min: 0.40, text: '可接受', color: 'text-orange-600' },
+                    { min: 0, text: '需改善', color: 'text-red-600' }
+                ]
+            };
+            
+            const rules = ratings[metric];
+            if (!rules) return { text: '-', color: 'text-gray-500' };
+            
+            const absValue = Math.abs(value);
+            
+            if (metric === 'acc10' || metric === 'acc20') {
+                for (const rule of rules) {
+                    if (value >= rule.min) return rule;
+                }
+            } else {
+                for (const rule of rules) {
+                    if (absValue < rule.max) return rule;
+                }
+            }
+            
+            return { text: '-', color: 'text-gray-500' };
+        }
+
+        // 顯示結果
+        function displayResults(result) {
+            // 顯示指標
+            document.getElementById('results-metrics').classList.remove('hidden');
+            
+            const wmape = result.overall.wmape;
+            const mape = result.overall.mape;
+            const bias = result.overall.bias;
+            const acc10 = result.overall.acc_10;
+            const acc20 = result.overall.acc_20;
+            
+            document.getElementById('metric-wmape').textContent = (wmape * 100).toFixed(1) + '%';
+            document.getElementById('metric-mape').textContent = (mape * 100).toFixed(1) + '%';
+            document.getElementById('metric-bias').textContent = (bias * 100).toFixed(1) + '%';
+            document.getElementById('metric-rmse').textContent = result.overall.rmse.toFixed(0);
+            document.getElementById('metric-acc10').textContent = (acc10 * 100).toFixed(1) + '%';
+            document.getElementById('metric-acc20').textContent = (acc20 * 100).toFixed(1) + '%';
+            
+            // 顯示評估提示
+            const wmapeRating = getMetricRating('wmape', wmape);
+            const mapeRating = getMetricRating('mape', mape);
+            const biasRating = getMetricRating('bias', bias);
+            const acc10Rating = getMetricRating('acc10', acc10);
+            const acc20Rating = getMetricRating('acc20', acc20);
+            
+            document.getElementById('metric-wmape-hint').innerHTML = `<span class="${wmapeRating.color}">${wmapeRating.text}</span>`;
+            document.getElementById('metric-mape-hint').innerHTML = `<span class="${mapeRating.color}">${mapeRating.text}</span>`;
+            document.getElementById('metric-bias-hint').innerHTML = `<span class="${biasRating.color}">${bias > 0 ? '預測偏高' : bias < 0 ? '預測偏低' : '無偏差'} - ${biasRating.text}</span>`;
+            document.getElementById('metric-rmse-hint').innerHTML = `<span class="text-gray-500">平均誤差量</span>`;
+            document.getElementById('metric-acc10-hint').innerHTML = `<span class="${acc10Rating.color}">${acc10Rating.text}</span>`;
+            document.getElementById('metric-acc20-hint').innerHTML = `<span class="${acc20Rating.color}">${acc20Rating.text}</span>`;
+            
+            // 更新圖表
+            updateChart(result.all_actuals, result.all_forecasts);
+            
+            // 顯示輪次明細
+            displayRoundDetails(result.round_details);
+            
+            // 隱藏比較表
+            document.getElementById('comparison-table').classList.add('hidden');
+        }
+
+        // 顯示比較結果
+        function displayComparison(result) {
+            const tbody = document.getElementById('comparison-tbody');
+            tbody.innerHTML = result.results.map((r, i) => {
+                const methodName = getMethodDisplayName(r.method, r.params);
+                const rowClass = i === 0 ? 'bg-green-50' : '';
+                return `
+                    <tr class="${rowClass} border-b hover:bg-gray-50">
+                        <td class="px-4 py-3 font-medium">${i + 1}</td>
+                        <td class="px-4 py-3">${methodName}</td>
+                        <td class="px-4 py-3 text-right font-semibold ${i === 0 ? 'text-green-600' : ''}">${(r.overall.wmape * 100).toFixed(1)}%</td>
+                        <td class="px-4 py-3 text-right">${(r.overall.mape * 100).toFixed(1)}%</td>
+                        <td class="px-4 py-3 text-right">${(r.overall.bias * 100).toFixed(1)}%</td>
+                        <td class="px-4 py-3 text-right">${(r.overall.acc_20 * 100).toFixed(1)}%</td>
+                    </tr>
+                `;
+            }).join('');
+            
+            document.getElementById('comparison-table').classList.remove('hidden');
+            document.getElementById('round-details').classList.add('hidden');
+        }
+
+        // 取得方法顯示名稱
+        function getMethodDisplayName(method, params) {
+            if (method === 'SMA') return `SMA-${params.window}`;
+            if (method === 'SES') return `SES(α=${params.alpha})`;
+            if (method === 'Holt') return `Holt(α=${params.alpha},β=${params.beta})`;
+            if (method === 'HoltWinters') return `HW-${params.seasonal_type === 'add' ? 'Add' : 'Mul'}`;
+            return method;
+        }
+
+        // 顯示輪次明細
+        function displayRoundDetails(rounds) {
+            const tbody = document.getElementById('round-tbody');
+            tbody.innerHTML = rounds.map(r => `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-3 py-2">${r.round}</td>
+                    <td class="px-3 py-2">${r.train_end}</td>
+                    <td class="px-3 py-2">${r.test_period}</td>
+                    <td class="px-3 py-2 text-right">${(r.wmape * 100).toFixed(1)}%</td>
+                    <td class="px-3 py-2 text-right">${(r.bias * 100).toFixed(1)}%</td>
+                </tr>
+            `).join('');
+            
+            document.getElementById('round-details').classList.remove('hidden');
+        }
+
+        // 更新圖表
+        function updateChart(actuals, forecasts) {
+            const ctx = document.getElementById('forecast-chart').getContext('2d');
+            
+            if (forecastChart) {
+                forecastChart.destroy();
+            }
+            
+            const labels = actuals.map((_, i) => `期${i + 1}`);
+            
+            forecastChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: '實際值',
+                            data: actuals,
+                            borderColor: '#6366f1',
+                            backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                            fill: true,
+                            tension: 0.3
+                        },
+                        {
+                            label: '預測值',
+                            data: forecasts,
+                            borderColor: '#ec4899',
+                            backgroundColor: 'rgba(236, 72, 153, 0.1)',
+                            borderDash: [5, 5],
+                            fill: false,
+                            tension: 0.3
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: value => value.toLocaleString()
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 顯示/隱藏 Loading
+        function showLoading(show) {
+            document.getElementById('loading-overlay').classList.toggle('hidden', !show);
+        }
+    </script>
+</body>
+</html>
