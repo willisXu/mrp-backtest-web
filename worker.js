@@ -1,7 +1,7 @@
 /*
  * 計算用 Web Worker：在背景執行緒載入 Pyodide 並執行原本的 web_app.py，
  * 計算時不會卡住頁面。由 bridge.js 建立，訊息格式：
- *   → {type: "init", csv}                         ← {type: "ready"} / {type: "error", message}
+ *   → {type: "init", files: {檔名: CSV}}           ← {type: "ready"} / {type: "error", message}
  *   → {type: "request", id, method, path, body}   ← {type: "response", id, status, body, ctype}
  *   ← {type: "status", text}（載入進度）
  */
@@ -37,13 +37,14 @@ booting.catch(() => {}); // 錯誤在 init 時回報
 
 let handle = null;
 
-async function init(csv) {
+async function init(files) {
   const pyodide = await booting;
-  pyodide.FS.writeFile("/app/sales_agg.csv", csv);
+  for (const [name, text] of Object.entries(files)) pyodide.FS.writeFile("/app/" + name, text);
   pyodide.runPython(`
 import os, sys
 sys.path.insert(0, "/app")
 os.environ["DATA_FILE"] = "/app/sales_agg.csv"
+os.environ["SELLOUT_FILE"] = "/app/sellout.csv"  # 不存在時 Sell-out 選項顯示找不到資料檔
 from web_app import app
 _client = app.test_client()
 
@@ -58,7 +59,7 @@ def handle(method, path, body):
 onmessage = async ({ data: msg }) => {
   if (msg.type === "init") {
     try {
-      await init(msg.csv);
+      await init(msg.files);
       postMessage({ type: "ready" });
     } catch (e) {
       postMessage({ type: "error", message: String(e?.message || e) });

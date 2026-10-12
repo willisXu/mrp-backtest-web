@@ -35,11 +35,24 @@ BASE_DIR = Path(__file__).resolve().parent
 app = Flask(__name__, template_folder="templates", static_folder="static")
 CORS(app)
 
-DATA_CACHE: dict[str, Any] = {"df": None, "loaded": False, "source": None}
+DATA_CACHE: dict[str, pd.DataFrame] = {}
 
-# DATA_FILE 可指向 .xlsx 或彙總後的 .csv（網頁版由 site/publish.py 產生）
-PRIMARY_DATA_FILE = Path(os.environ.get("DATA_FILE", BASE_DIR / "Sellin_數據_扁平化.xlsx"))
-PRIMARY_SHEET = "銷售明細"
+# 資料集：sellin＝通路×系列的銷貨淨額（元）；sellout＝通路×料號的銷貨數量（個）。
+# 檔案可為 .xlsx 或彙總後的 .csv（網頁版由 site/publish.py 產生，以環境變數指定）
+DATASETS = {
+    "sellin": {
+        "file": Path(os.environ.get("DATA_FILE", BASE_DIR / "Sellin_數據_扁平化.xlsx")),
+        "columns": {"年月": "date", "通路": "channel", "系列": "series", "銷貨淨額": "sales"},
+        "label": "Sell-in 銷貨淨額", "item_label": "系列", "unit": "元",
+    },
+    "sellout": {
+        "file": Path(os.environ.get("SELLOUT_FILE", BASE_DIR / "Sellout_數據_扁平化.xlsx")),
+        "columns": {"年月": "date", "通路": "channel", "料號": "series", "銷貨數量": "sales"},
+        "label": "Sell-out 銷貨數量", "item_label": "料號", "unit": "個",
+    },
+}
+DATA_SHEET = "銷售明細"
+SKU_LIST_SIZE = 150  # 料號選單只列近 12 個月銷量最高的前 N 個
 
 FORMULA_INFO = {
     "Naive": {"name": "Naive", "params": []},
@@ -282,13 +295,7 @@ def _normalize_month(series: pd.Series) -> pd.Series:
     return pd.to_datetime(series.astype(str), format="%Y-%m", errors="coerce")
 
 
-def _standardize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    rename_map = {
-        "年月": COLS.date,
-        "通路": COLS.channel,
-        "系列": COLS.series,
-        "銷貨淨額": COLS.sales,
-    }
+def _standardize_dataframe(df: pd.DataFrame, rename_map: dict[str, str]) -> pd.DataFrame:
     missing = [source for source in rename_map if source not in df.columns]
     if missing:
         raise ValueError(f"資料欄位不足: {missing}")
@@ -299,29 +306,35 @@ def _standardize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     standardized[COLS.series] = standardized[COLS.series].fillna("未分類").astype(str).str.strip()
     standardized[COLS.sales] = pd.to_numeric(standardized[COLS.sales], errors="coerce").fillna(0.0)
     standardized = standardized.dropna(subset=[COLS.date])
+    if "品名" in df.columns:  # 料號的顯示名稱
+        standardized["name"] = df["品名"].fillna("").astype(str).str.strip()
     return standardized
 
 
-def load_data() -> pd.DataFrame | None:
-    if DATA_CACHE["loaded"]:
-        return DATA_CACHE["df"]
+def load_data(dataset: str = "sellin") -> pd.DataFrame | None:
+    if dataset in DATA_CACHE:
+        return DATA_CACHE[dataset]
 
-    if not PRIMARY_DATA_FILE.exists():
+    spec = DATASETS.get(dataset)
+    if spec is None or not spec["file"].exists():
         return None
 
     try:
-        if PRIMARY_DATA_FILE.suffix.lower() == ".csv":
-            raw = pd.read_csv(PRIMARY_DATA_FILE, dtype={"年月": str})
+        dtype = {"年月": str, "料號": str}
+        if spec["file"].suffix.lower() == ".csv":
+            raw = pd.read_csv(spec["file"], dtype=dtype)
         else:
-            raw = pd.read_excel(PRIMARY_DATA_FILE, sheet_name=PRIMARY_SHEET)
-        df = _standardize_dataframe(raw)
-        DATA_CACHE["df"] = df
-        DATA_CACHE["loaded"] = True
-        DATA_CACHE["source"] = PRIMARY_DATA_FILE.name
+            raw = pd.read_excel(spec["file"], sheet_name=DATA_SHEET, dtype=dtype)
+        df = _standardize_dataframe(raw, spec["columns"])
+        DATA_CACHE[dataset] = df
         return df
     except Exception as exc:
-        print(f"load_data failed: {exc}")
+        print(f"load_data({dataset}) failed: {exc}")
         return None
+
+
+def _dataset_from(value: Any) -> str:
+    return value if value in DATASETS else "sellin"
 
 
 def get_channel_time_series(df: pd.DataFrame, channel: str, series: str | None = None) -> pd.Series:
@@ -333,7 +346,8 @@ def get_channel_time_series(df: pd.DataFrame, channel: str, series: str | None =
 
     ts = filtered.groupby(COLS.date)[COLS.sales].sum().sort_index()
     if len(ts):
-        full_range = pd.date_range(ts.index.min(), ts.index.max(), freq="MS")
+        # 補到資料集最後一個月：已停賣的料號／通路，近期應視為 0 而不是截在最後有銷售的月份
+        full_range = pd.date_range(ts.index.min(), df[COLS.date].max(), freq="MS")
         ts = ts.reindex(full_range, fill_value=0.0)
     return ts.astype(float)
 
@@ -461,7 +475,14 @@ def run_backtest(
     }
 
 
-def _build_series_list(df: pd.DataFrame) -> list[dict[str, str]]:
+def _build_series_list(df: pd.DataFrame, dataset: str) -> list[dict[str, str]]:
+    if dataset == "sellout":
+        recent = df[df[COLS.date] > df[COLS.date].max() - pd.DateOffset(months=12)]
+        top = recent.groupby(COLS.series)[COLS.sales].sum().sort_values(ascending=False).head(SKU_LIST_SIZE)
+        names = df.drop_duplicates(COLS.series, keep="last").set_index(COLS.series)["name"]
+        return [{"key": "ALL", "name": "全部料號"}] + [
+            {"key": sku, "name": f"{sku} {names.get(sku, '')}".strip()} for sku in top.index
+        ]
     series_sales = df.groupby(COLS.series)[COLS.sales].sum().sort_values(ascending=False)
     top_series = series_sales.head(15).index.tolist()
     return [{"key": "ALL", "name": "全部系列"}] + [{"key": item, "name": item} for item in top_series]
@@ -479,7 +500,8 @@ def demand_planning_page():
 
 @app.route("/api/data/info")
 def get_data_info():
-    df = load_data()
+    dataset = _dataset_from(request.args.get("dataset"))
+    df = load_data(dataset)
     if df is None:
         return jsonify({"error": "找不到資料檔"}), 500
 
@@ -488,10 +510,14 @@ def get_data_info():
         {
             "channels": ["ALL"] + channels,
             "channel_names": {"ALL": "全部通路", **{channel: channel for channel in channels}},
-            "series": _build_series_list(df),
+            "series": _build_series_list(df, dataset),
             "year_range": [int(df[COLS.date].dt.year.min()), int(df[COLS.date].dt.year.max())],
             "total_records": int(len(df)),
-            "data_source": DATA_CACHE.get("source", "unknown"),
+            "data_source": DATASETS[dataset]["file"].name,
+            "dataset": dataset,
+            "datasets": {key: {"label": spec["label"], "item_label": spec["item_label"], "unit": spec["unit"],
+                               "available": spec["file"].exists()} for key, spec in DATASETS.items()},
+            "data_end": df[COLS.date].max().strftime("%Y-%m"),
         }
     )
 
@@ -531,7 +557,7 @@ def get_formula_info():
 @app.route("/api/backtest/run", methods=["POST"])
 def run_backtest_api():
     payload = request.get_json(silent=True) or {}
-    df = load_data()
+    df = load_data(_dataset_from(payload.get("dataset")))
     if df is None:
         return jsonify({"error": "找不到資料檔"}), 500
 
@@ -568,7 +594,7 @@ def run_backtest_api():
 @app.route("/api/backtest/compare", methods=["POST"])
 def compare_methods_api():
     payload = request.get_json(silent=True) or {}
-    df = load_data()
+    df = load_data(_dataset_from(payload.get("dataset")))
     if df is None:
         return jsonify({"error": "找不到資料檔"}), 500
 

@@ -1,5 +1,5 @@
 /*
- * 網頁版橋接：輸入密碼解密 data.enc（PBKDF2-SHA256 → AES-256-GCM，gzip CSV），
+ * 網頁版橋接：輸入密碼解密 data.enc（PBKDF2-SHA256 → AES-256-GCM，gzip JSON：{檔名: CSV}），
  * 交給 worker.js 在背景執行緒以 Pyodide 執行原本的 web_app.py，
  * 頁面上的 fetch('/api/...') 改由它回應。data.enc 由 site/publish.py 產生。
  */
@@ -31,10 +31,10 @@
     }
   };
 
-  function initWorker(csv) {
+  function initWorker(files) {
     return new Promise((resolve, reject) => {
       onInit = (msg) => (msg.type === "ready" ? resolve() : reject(new Error(msg.message)));
-      worker.postMessage({ type: "init", csv });
+      worker.postMessage({ type: "init", files });
     });
   }
 
@@ -122,14 +122,14 @@
 
     async function unlock(password) {
       btn.disabled = true; input.disabled = true; err.textContent = "";
-      let enc, csv;
+      let enc, files;
       try {
         enc = await encPromise;
       } catch {
         return; // 錯誤訊息已由 encPromise.catch 顯示
       }
       try {
-        csv = await decrypt(enc, password);
+        files = JSON.parse(await decrypt(enc, password));
       } catch {
         store.del(PW_KEY);
         err.textContent = "密碼錯誤";
@@ -140,7 +140,7 @@
       onStatus = (t) => { status.textContent = t; };
       onStatus(lastStatus || "載入計算引擎…");
       try {
-        await initWorker(csv);
+        await initWorker(files);
         overlay.remove();
         resolveReady();
       } catch (e) {
