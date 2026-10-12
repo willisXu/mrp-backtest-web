@@ -48,6 +48,7 @@ os.environ["SELLOUT_FILE"] = "/app/sellout.csv"  # 不存在時 Sell-out 選項�
 os.environ["RECORDS_FILE"] = "/app/backtest_records.json"  # 共用回測總表
 os.environ["SKU_FILE"] = "/app/sku.csv"  # 料號數量（存貨表）
 os.environ["SKU_STOCK_FILE"] = "/app/sku_stock.csv"
+os.environ["FCT_FILE"] = "/app/fct_backtest.json"  # 公司 FCT 預測對照
 from web_app import app
 _client = app.test_client()
 

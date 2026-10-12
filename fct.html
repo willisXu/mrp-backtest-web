@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <script src="bridge.js?v=5b37544266"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FCT 對照 - MRP 生產預測回測</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="static/method_docs.js?v=5b37544266"></script>
+    <script src="static/backtest_view.js?v=5b37544266"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans TC', sans-serif; }
+        .sel { background: #eef2ff; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <header class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+                <h1 class="text-xl font-bold text-gray-800">FCT 預測對照</h1>
+                <p class="text-sm text-gray-500">公司各版 FCT 的通路 FCST，與實際進貨、需求計劃公式、系統預測方法比較</p>
+            </div>
+            <nav class="flex items-center gap-3 text-sm">
+                <a href="index.html" class="px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50">參數調整與回測</a>
+                <a href="records.html" class="px-4 py-2 rounded-lg border border-indigo-300 text-indigo-700 hover:bg-indigo-50">回測紀錄</a>
+                <a href="demand-planning.html" class="px-4 py-2 rounded-lg bg-gradient-to-r from-green-500 to-teal-600 text-white hover:from-green-600 hover:to-teal-700">需求計劃公式</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+        <div id="meta" class="text-sm text-gray-500">載入中…</div>
+
+        <details class="bg-white rounded-xl shadow-sm p-4 text-sm text-gray-700">
+            <summary class="cursor-pointer font-medium text-gray-800">這頁在比什麼？（比較方式與限制）</summary>
+            <ul class="list-disc pl-5 mt-2 space-y-1">
+                <li><b>FCT</b>：存貨表中各版「FCTyymm」工作表，每個料號在屈臣氏（WSN）、康是美（CSM）、寶雅（POYA）的 FCST。FCST 空白代表該通路沒有提報，不列入比較；填 0 則視為預測 0。</li>
+                <li><b>比較期間 = 版本月起 3 個月</b>：FCST 約是單月進貨量的 2.5 倍，與「版本月起 3 個月」的進貨合計最接近（總量比約 0.86、相關性最高），因此每一版都和這 3 個月的實際進貨比。例如 FCT2507 對 2025-07～09。</li>
+                <li><b>實際值</b>：通路 × 料號只有 Sell-in 金額，以「料號近兩年 Sell-in 金額 ÷ 存貨表 Sell-in 數量」的平均進貨單價換算成數量，是估計值；促銷月單價較低時實際數量會略被低估。</li>
+                <li><b>系統方法</b>：只用版本月「前一個月」以前的通路進貨資料，預測 3 個月合計（等同當時做 FCT 時能拿到的資料）；需求計劃公式的 30% Sell-out 使用該通路實際 Sell-out 數量。歷史不足 12 個月的料號只比 FCT。</li>
+                <li><b>混合</b>：FCT × 70% + 需求計劃公式 × 30%。權重是用 2023～2024 年的版本挑選，再拿 2025 年的版本驗證，不是事後挑最好看的數字。</li>
+                <li><b>MA-12(B) × 3</b>：2025 起的 FCT 表上各通路的基準月均（不含活動），乘 3 個月，用來看「活動需求量」的調整有沒有讓預測更準。</li>
+            </ul>
+        </details>
+
+        <div class="bg-white rounded-xl shadow-sm p-4 flex flex-wrap gap-3 items-end">
+            <label class="text-sm">通路
+                <select id="f-ch" class="block mt-1 px-3 py-2 border rounded-lg"></select>
+            </label>
+            <label class="text-sm">版本期間
+                <select id="f-era" class="block mt-1 px-3 py-2 border rounded-lg">
+                    <option value="all">全部版本</option>
+                    <option value="2023">2023～2024（FCT2312～FCT2405）</option>
+                    <option value="2025">2025 起（FCT2502～）</option>
+                </select>
+            </label>
+            <label class="text-sm">比較層級
+                <select id="f-level" class="block mt-1 px-3 py-2 border rounded-lg">
+                    <option value="row">通路 × 料號</option>
+                    <option value="sku">料號（三通路合計）</option>
+                </select>
+            </label>
+            <label class="text-sm flex-1 min-w-[12rem]">搜尋料號
+                <input id="f-search" type="search" placeholder="料號、規格或品名" class="block w-full mt-1 px-3 py-2 border rounded-lg">
+            </label>
+        </div>
+
+        <div id="cards" class="grid grid-cols-2 lg:grid-cols-4 gap-4"></div>
+
+        <div class="bg-white rounded-xl shadow-sm p-5">
+            <h2 class="font-bold text-gray-800 mb-2">結果解讀</h2>
+            <ul id="explain" class="list-disc pl-5 space-y-1 text-sm text-gray-700"></ul>
+        </div>
+
+        <div class="grid lg:grid-cols-2 gap-6">
+            <div class="bg-white rounded-xl shadow-sm p-5">
+                <h2 class="font-bold text-gray-800 mb-1">各版本誤差（wMAPE）</h2>
+                <p class="text-xs text-gray-400 mb-2">越低越準；每一版比較該版本月起 3 個月的實際進貨。</p>
+                <div class="h-72"><canvas id="ver-chart"></canvas></div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-5">
+                <h2 class="font-bold text-gray-800 mb-1">方法排名</h2>
+                <p class="text-xs text-gray-400 mb-2">只計入所有方法都有預測的列（歷史滿 12 個月）。命中率＝誤差在 ±30% 以內的比例。</p>
+                <div class="overflow-x-auto max-h-72">
+                    <table class="w-full text-sm">
+                        <thead class="sticky top-0 bg-gray-50 text-gray-600">
+                            <tr><th class="px-2 py-1 text-left">#</th><th class="px-2 py-1 text-left">方法</th>
+                                <th class="px-2 py-1 text-right">wMAPE</th><th class="px-2 py-1 text-right">Bias</th>
+                                <th class="px-2 py-1 text-right">命中率</th></tr>
+                        </thead>
+                        <tbody id="rank-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-sm p-5">
+            <h2 class="font-bold text-gray-800 mb-2">各版本明細</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 text-gray-600">
+                        <tr><th class="px-2 py-1 text-left">版本</th><th class="px-2 py-1 text-left">比較期間</th>
+                            <th class="px-2 py-1 text-right">筆數</th><th class="px-2 py-1 text-right">FCST 合計</th>
+                            <th class="px-2 py-1 text-right">實際合計</th><th class="px-2 py-1 text-right">FCT</th>
+                            <th class="px-2 py-1 text-right">需求計劃公式</th><th class="px-2 py-1 text-right">混合</th>
+                            <th class="px-2 py-1 text-left">最準</th></tr>
+                    </thead>
+                    <tbody id="ver-tbody"></tbody>
+                </table>
+            </div>
+            <p id="pending-note" class="text-xs text-gray-400 mt-2"></p>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-sm p-5">
+            <h2 class="font-bold text-gray-800 mb-2">各料號</h2>
+            <div class="overflow-x-auto max-h-[28rem]">
+                <table class="w-full text-sm">
+                    <thead class="sticky top-0 bg-gray-50 text-gray-600">
+                        <tr><th class="px-2 py-1 text-left">料號</th><th class="px-2 py-1 text-right">版本數</th>
+                            <th class="px-2 py-1 text-right">FCST 合計</th><th class="px-2 py-1 text-right">實際合計</th>
+                            <th class="px-2 py-1 text-right">FCT</th><th class="px-2 py-1 text-right">需求計劃公式</th>
+                            <th class="px-2 py-1 text-right">混合</th><th class="px-2 py-1 text-left">較準</th></tr>
+                    </thead>
+                    <tbody id="sku-tbody"></tbody>
+                </table>
+            </div>
+            <p class="text-xs text-gray-400 mt-2">依實際進貨量由大到小排列；點選料號查看每一版的預測與實際。</p>
+        </div>
+
+        <div id="sku-detail" class="bg-white rounded-xl shadow-sm p-5 hidden">
+            <h2 id="sku-title" class="font-bold text-gray-800 mb-1"></h2>
+            <p id="sku-sub" class="text-xs text-gray-400 mb-3"></p>
+            <div class="h-72 mb-4"><canvas id="sku-chart"></canvas></div>
+            <div class="overflow-x-auto max-h-96">
+                <table class="w-full text-sm">
+                    <thead class="sticky top-0 bg-gray-50 text-gray-600">
+                        <tr><th class="px-2 py-1 text-left">版本</th><th class="px-2 py-1 text-left">期間</th><th class="px-2 py-1 text-left">通路</th>
+                            <th class="px-2 py-1 text-right">FCST</th><th class="px-2 py-1 text-right">需求計劃公式</th>
+                            <th class="px-2 py-1 text-right">混合</th><th class="px-2 py-1 text-right">實際（估）</th>
+                            <th class="px-2 py-1 text-right">FCT 誤差</th></tr>
+                    </thead>
+                    <tbody id="sku-rows"></tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const BLEND = 0.7;          // 混合：FCT 權重
+        const HIT = 0.3;            // 命中率門檻 ±30%
+        const n0 = v => v == null || isNaN(v) ? '-' : Math.round(v).toLocaleString();
+        const pct = v => v == null || !isFinite(v) ? '-' : (v * 100).toFixed(1) + '%';
+        const sgn = v => v == null || !isFinite(v) ? '-' : (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + '%';
+        let D, F, verChart, skuChart, selectedSku = null;
+
+        const period = m => { const [y, mo] = m.split('-').map(Number); const e = new Date(y, mo + 1, 1);
+            return `${m}～${e.getFullYear()}-${String(e.getMonth() + 1).padStart(2, '0')}`; };
+        const blend = r => r.f[F] == null ? null : BLEND * r.fcst + (1 - BLEND) * r.f[F];
+
+        // 比較對象：名稱 → 取值函式
+        function comparators() {
+            const c = { 'FCT（公司預測）': r => r.fcst, [F]: r => r.f[F] ?? null,
+                        [`混合（FCT ${BLEND * 100}% + 公式 ${100 - BLEND * 100}%）`]: blend };
+            D.methods.filter(m => m !== F).forEach(m => { c[m] = r => r.f[m] ?? null; });
+            c['MA-12(B) × 3（FCT 表基準）'] = r => r.ma12;
+            return c;
+        }
+        const KEY = { fct: 'FCT（公司預測）' };
+
+        function stats(rows, get) {
+            let err = 0, sum = 0, act = 0, hit = 0, n = 0;
+            rows.forEach(r => { const f = get(r); if (f == null) return;
+                err += Math.abs(f - r.actual); sum += f - r.actual; act += r.actual; n++;
+                if (r.actual > 0 && Math.abs(f - r.actual) / r.actual <= HIT) hit++; });
+            // 實際為 0 時百分比誤差沒有意義
+            return n ? (act > 0 ? { wmape: err / act, bias: sum / act, hit: hit / n, n } : { wmape: null, bias: null, hit: hit / n, n }) : null;
+        }
+
+        // 篩選後的列；料號層級時把同版本三通路加總
+        function filtered() {
+            const ch = document.getElementById('f-ch').value, era = document.getElementById('f-era').value;
+            const q = document.getElementById('f-search').value.trim().toLowerCase();
+            let rows = D.rows.filter(r => (ch === 'all' || r.ch === ch) &&
+                (era === 'all' || (era === '2023' ? r.m < '2025-01' : r.m >= '2025-01')) &&
+                (!q || r.sku.includes(q) || (D.names[r.sku] || '').toLowerCase().includes(q) || (r.code || '').toLowerCase().includes(q)));
+            if (document.getElementById('f-level').value === 'sku') {
+                const g = {};
+                rows.forEach(r => {
+                    const k = r.v + '|' + r.sku;
+                    const t = g[k] ||= { v: r.v, m: r.m, sku: r.sku, code: r.code, ch: '合計', fcst: 0, actual: 0, ma12: 0, f: {}, _miss: new Set() };
+                    t.fcst += r.fcst; t.actual += r.actual;
+                    t.ma12 = r.ma12 == null || t.ma12 == null ? null : t.ma12 + r.ma12;
+                    D.methods.forEach(m => { if (r.f[m] == null) t._miss.add(m); else t.f[m] = (t.f[m] || 0) + r.f[m]; });
+                });
+                rows = Object.values(g).map(t => { t._miss.forEach(m => delete t.f[m]); return t; });
+            }
+            return rows;
+        }
+
+        function render() {
+            const rows = filtered(), comp = comparators();
+            const full = rows.filter(r => r.f[F] != null);
+            const rank = Object.entries(comp).map(([name, get]) => ({ name, ...stats(full, get) }))
+                .filter(x => x.n && x.wmape != null).sort((a, b) => a.wmape - b.wmape);
+            const fct = rank.find(x => x.name === KEY.fct), formula = rank.find(x => x.name === F);
+            const blendName = Object.keys(comp)[2], mix = rank.find(x => x.name === blendName);
+            const sys = rank.filter(x => D.methods.includes(x.name))[0];
+
+            // 卡片
+            const card = (title, s, note, color) => `<div class="bg-white rounded-xl shadow-sm p-4 border-l-4 border-${color}-500">
+                <div class="text-xs text-gray-500">${title}</div>
+                <div class="text-2xl font-bold text-gray-800 mt-1">${s ? pct(s.wmape) : '-'}</div>
+                <div class="text-xs text-gray-500 mt-1">Bias ${s ? sgn(s.bias) : '-'}｜命中率 ${s ? pct(s.hit) : '-'}</div>
+                <div class="text-xs text-gray-400 mt-1">${note}</div></div>`;
+            document.getElementById('cards').innerHTML =
+                card('FCT（公司預測）', fct, '各版 FCST', 'indigo') +
+                card('需求計劃公式（現行）', formula, '只用歷史資料', 'teal') +
+                card('系統最準方法', sys, sys ? BV.esc(sys.name) : '', 'gray') +
+                card('混合（FCT 70% + 公式 30%）', mix, '建議做法', 'green');
+
+            // 解讀
+            const ex = [];
+            if (fct && formula) {
+                ex.push(`共 ${full.length.toLocaleString()} 筆可比較（${document.getElementById('f-level').value === 'sku' ? '版本 × 料號' : '版本 × 通路 × 料號'}）；另有 ${(rows.length - full.length).toLocaleString()} 筆因歷史不足 12 個月只有 FCT。`);
+                const d = formula.wmape - fct.wmape;
+                ex.push(d > 0
+                    ? `<b>FCT 比系統方法準</b>：FCT 誤差 ${pct(fct.wmape)}，需求計劃公式 ${pct(formula.wmape)}，最準的系統方法（${BV.esc(sys.name)}）${pct(sys.wmape)}。FCT 已經納入檔期、活動與通路訂貨資訊，這些是只看歷史銷售的方法無法知道的。`
+                    : `<b>需求計劃公式比 FCT 準</b>：公式誤差 ${pct(formula.wmape)}，FCT ${pct(fct.wmape)}，在這個範圍內 FCT 的人工調整沒有帶來改善。`);
+                if (mix && mix.wmape < Math.min(fct.wmape, formula.wmape))
+                    ex.push(`<b>兩者混合最準</b>：FCT × 70% + 公式 × 30% 的誤差 ${pct(mix.wmape)}，比單用 FCT 再降 ${((fct.wmape - mix.wmape) * 100).toFixed(1)} 個百分點。公式把 FCT 過度樂觀或過度保守的部分拉回歷史水準。`);
+                ex.push(fct.bias < -0.05 ? `FCT 整體<b>偏低 ${Math.abs(fct.bias * 100).toFixed(1)}%</b>（預測少於實際進貨），排產若只看 FCT 容易不足。`
+                    : fct.bias > 0.05 ? `FCT 整體<b>偏高 ${(fct.bias * 100).toFixed(1)}%</b>（預測多於實際進貨），容易造成庫存積壓。` : `FCT 整體沒有明顯偏高或偏低（Bias ${sgn(fct.bias)}）。`);
+                const zero = full.filter(r => r.fcst === 0), zs = stats(zero, comp[F]);
+                if (zero.length && zs) {
+                    const za = zero.reduce((a, r) => a + r.actual, 0), zf = zero.reduce((a, r) => a + r.f[F], 0);
+                    ex.push(`FCST 填 0 的有 ${zero.length} 筆：實際進貨合計 ${n0(za)}，公式預測 ${n0(zf)}；${zf > za ? 'FCST 填 0 通常代表通路近期不會進貨（例如庫存充足、換檔），公式只看歷史會高估。' : '這些料號實際仍有進貨，FCST 填 0 會低估。'}`);
+                }
+                const ma = rank.find(x => x.name.startsWith('MA-12(B)'));
+                const fctMa = stats(full.filter(r => r.ma12 != null), comp[KEY.fct]);
+                if (ma && fctMa) ex.push(`與 FCT 表上的基準 MA-12(B) × 3 比（${ma.n} 筆）：基準誤差 ${pct(ma.wmape)}，加上活動需求量後的 FCST 為 ${pct(fctMa.wmape)}，${fctMa.wmape < ma.wmape ? '活動需求量的調整有效' : '活動需求量的調整沒有讓預測更準'}。`);
+                ex.push(`建議：排產時以 FCT 為主，但用需求計劃公式校正（約 7：3），並留意 FCT 長期偏${fct.bias < 0 ? '低' : '高'}的通路與料號；誤差仍在 50% 以上，單一通路單一料號的預測僅能當參考，應搭配「計劃可用月數」看整體庫存。`);
+            } else ex.push('目前篩選條件沒有可比較的資料。');
+            document.getElementById('explain').innerHTML = ex.map(s => `<li>${s}</li>`).join('');
+
+            // 排名
+            document.getElementById('rank-tbody').innerHTML = rank.map((x, i) => {
+                const hl = x.name === KEY.fct ? 'font-bold text-indigo-700' : x.name === F ? 'font-bold text-teal-700' : x.name === blendName ? 'font-bold text-green-700' : '';
+                return `<tr class="border-t ${hl}"><td class="px-2 py-1">${i + 1}</td><td class="px-2 py-1">${BV.esc(x.name)}${x.name.startsWith('MA-12') ? `<span class="text-xs text-gray-400">（${x.n} 筆）</span>` : ''}</td>
+                    <td class="px-2 py-1 text-right">${pct(x.wmape)}</td><td class="px-2 py-1 text-right">${sgn(x.bias)}</td><td class="px-2 py-1 text-right">${pct(x.hit)}</td></tr>`;
+            }).join('');
+
+            // 版本
+            const byV = {};
+            full.forEach(r => (byV[r.v] ||= []).push(r));
+            const vers = D.versions.filter(v => byV[v]);
+            const vs = vers.map(v => { const g = byV[v];
+                return { v, m: g[0].m, n: g.length, F: g.reduce((a, r) => a + r.fcst, 0), A: g.reduce((a, r) => a + r.actual, 0),
+                         fct: stats(g, comp[KEY.fct]).wmape, formula: stats(g, comp[F]).wmape, mix: stats(g, comp[blendName]).wmape }; });
+            const best = x => [['FCT', x.fct], ['公式', x.formula], ['混合', x.mix]].sort((a, b) => a[1] - b[1])[0][0];
+            document.getElementById('ver-tbody').innerHTML = vs.map(x => `<tr class="border-t">
+                <td class="px-2 py-1">${BV.esc(x.v)}</td><td class="px-2 py-1 text-gray-500">${period(x.m)}</td><td class="px-2 py-1 text-right">${x.n}</td>
+                <td class="px-2 py-1 text-right">${n0(x.F)}</td><td class="px-2 py-1 text-right">${n0(x.A)}</td>
+                <td class="px-2 py-1 text-right">${pct(x.fct)}</td><td class="px-2 py-1 text-right">${pct(x.formula)}</td><td class="px-2 py-1 text-right">${pct(x.mix)}</td>
+                <td class="px-2 py-1">${best(x)}</td></tr>`).join('');
+            document.getElementById('pending-note').textContent = D.pending.length
+                ? `${D.pending.join('、')} 的 3 個月比較期間尚未結束（資料到 ${D.data_end}），暫不列入。` : '';
+            verChart?.destroy();
+            verChart = new Chart(document.getElementById('ver-chart'), { type: 'line',
+                data: { labels: vs.map(x => x.v.replace(/\(.*\)/, '')), datasets: [
+                    { label: 'FCT', data: vs.map(x => x.fct * 100), borderColor: '#4f46e5', tension: .2 },
+                    { label: '需求計劃公式', data: vs.map(x => x.formula * 100), borderColor: '#0d9488', tension: .2 },
+                    { label: '混合 7:3', data: vs.map(x => x.mix * 100), borderColor: '#16a34a', borderDash: [5, 4], tension: .2 }] },
+                options: { maintainAspectRatio: false, scales: { y: { title: { display: true, text: 'wMAPE (%)' }, beginAtZero: true } } } });
+
+            // 料號
+            const byS = {};
+            rows.forEach(r => (byS[r.sku] ||= []).push(r));
+            const ss = Object.entries(byS).map(([sku, g]) => { const c = g.filter(r => r.f[F] != null);
+                return { sku, g, nv: new Set(g.map(r => r.v)).size, F: g.reduce((a, r) => a + r.fcst, 0), A: g.reduce((a, r) => a + r.actual, 0),
+                         fct: stats(g, comp[KEY.fct])?.wmape, formula: c.length ? stats(c, comp[F]).wmape : null,
+                         mix: c.length ? stats(c, comp[blendName]).wmape : null, fctC: c.length ? stats(c, comp[KEY.fct]).wmape : null }; })
+                .sort((a, b) => b.A - a.A);
+            document.getElementById('sku-tbody').innerHTML = ss.map(x => {
+                const win = x.A <= 0 ? '實際為 0' : x.formula == null ? '只有 FCT' : [['FCT', x.fctC], ['公式', x.formula], ['混合', x.mix]].sort((a, b) => a[1] - b[1])[0][0];
+                return `<tr class="border-t cursor-pointer hover:bg-gray-50 ${x.sku === selectedSku ? 'sel' : ''}" data-sku="${x.sku}">
+                    <td class="px-2 py-1"><div>${BV.esc(D.names[x.sku] || x.sku)}</div><div class="text-xs text-gray-400">${x.sku}</div></td>
+                    <td class="px-2 py-1 text-right">${x.nv}</td><td class="px-2 py-1 text-right">${n0(x.F)}</td><td class="px-2 py-1 text-right">${n0(x.A)}</td>
+                    <td class="px-2 py-1 text-right">${pct(x.fct)}</td><td class="px-2 py-1 text-right">${pct(x.formula)}</td><td class="px-2 py-1 text-right">${pct(x.mix)}</td>
+                    <td class="px-2 py-1">${win}</td></tr>`; }).join('');
+            document.querySelectorAll('#sku-tbody tr').forEach(tr => tr.onclick = () => showSku(tr.dataset.sku));
+            if (selectedSku) showSku(selectedSku, rows, false);
+        }
+
+        function showSku(sku, rows = filtered(), scroll = true) {
+            selectedSku = sku;
+            document.querySelectorAll('#sku-tbody tr').forEach(tr => tr.classList.toggle('sel', tr.dataset.sku === sku));
+            const g = rows.filter(r => r.sku === sku).sort((a, b) => a.m.localeCompare(b.m) || a.ch.localeCompare(b.ch));
+            const box = document.getElementById('sku-detail');
+            if (!g.length) { box.classList.add('hidden'); return; }
+            box.classList.remove('hidden');
+            document.getElementById('sku-title').textContent = `${D.names[sku] || sku}（${sku}）`;
+            document.getElementById('sku-sub').textContent = `實際值以平均進貨單價 ${D.price[sku] ?? '-'} 元換算；每列比較版本月起 3 個月的合計。`;
+            document.getElementById('sku-rows').innerHTML = g.map(r => {
+                const e = r.actual > 0 ? (r.fcst - r.actual) / r.actual : null;
+                const col = e == null ? '' : Math.abs(e) <= HIT ? 'text-green-700' : Math.abs(e) <= 0.5 ? 'text-amber-600' : 'text-red-600';
+                return `<tr class="border-t"><td class="px-2 py-1">${BV.esc(r.v)}</td><td class="px-2 py-1 text-gray-500">${period(r.m)}</td>
+                    <td class="px-2 py-1">${BV.esc(D.channels[r.ch] || r.ch)}</td><td class="px-2 py-1 text-right">${n0(r.fcst)}</td>
+                    <td class="px-2 py-1 text-right">${n0(r.f[F])}</td><td class="px-2 py-1 text-right">${n0(blend(r))}</td>
+                    <td class="px-2 py-1 text-right font-medium">${n0(r.actual)}</td><td class="px-2 py-1 text-right ${col}">${sgn(e)}</td></tr>`; }).join('');
+            // 圖：每一版（各通路加總）
+            const byV = {};
+            g.forEach(r => { const t = byV[r.v] ||= { fcst: 0, actual: 0, formula: 0, ok: true };
+                t.fcst += r.fcst; t.actual += r.actual; if (r.f[F] == null) t.ok = false; else t.formula += r.f[F]; });
+            const vs = D.versions.filter(v => byV[v]);
+            skuChart?.destroy();
+            skuChart = new Chart(document.getElementById('sku-chart'), { type: 'bar',
+                data: { labels: vs.map(v => v.replace(/\(.*\)/, '')), datasets: [
+                    { label: '實際（估）', data: vs.map(v => byV[v].actual), backgroundColor: '#9ca3af' },
+                    { type: 'line', label: 'FCT', data: vs.map(v => byV[v].fcst), borderColor: '#4f46e5', backgroundColor: '#4f46e5' },
+                    { type: 'line', label: '需求計劃公式', data: vs.map(v => byV[v].ok ? byV[v].formula : null), borderColor: '#0d9488', backgroundColor: '#0d9488' }] },
+                options: { maintainAspectRatio: false, scales: { y: { beginAtZero: true, title: { display: true, text: '3 個月合計（個）' } } } } });
+            if (scroll) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        (async () => {
+            const res = await fetch('/api/fct-backtest');
+            D = await res.json();
+            if (!res.ok || D.error) { document.getElementById('meta').textContent = D.error || '載入失敗'; return; }
+            F = D.formula;
+            document.getElementById('meta').textContent =
+                `來源：${D.source}｜${D.versions.length} 個版本｜實際資料到 ${D.data_end}｜產生於 ${D.generated_at}`;
+            document.getElementById('f-ch').innerHTML = '<option value="all">全部通路</option>' +
+                Object.entries(D.channels).map(([k, v]) => `<option value="${k}">${v}（${k}）</option>`).join('');
+            ['f-ch', 'f-era', 'f-level'].forEach(id => document.getElementById(id).onchange = () => { selectedSku = null; document.getElementById('sku-detail').classList.add('hidden'); render(); });
+            let t; document.getElementById('f-search').oninput = () => { clearTimeout(t); t = setTimeout(render, 200); };
+            render();
+        })();
+    </script>
+</body>
+</html>

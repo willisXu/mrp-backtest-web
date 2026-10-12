@@ -192,6 +192,8 @@ DEFAULT_COMPARE_METHODS = [
 
 # 共用回測紀錄（build_backtest_records.py 產生；網頁版由 publish.py 一併加密）
 RECORDS_FILE = Path(os.environ.get("RECORDS_FILE", BASE_DIR / "output" / "backtest_records.json"))
+# 公司 FCT 預測 vs 實際（build_fct_backtest.py 產生）
+FCT_FILE = Path(os.environ.get("FCT_FILE", BASE_DIR / "output" / "fct_backtest.json"))
 
 
 @dataclass
@@ -574,6 +576,11 @@ def demand_planning_page():
 @app.route("/records")
 def records_page():
     return render_template("records.html")
+
+
+@app.route("/fct")
+def fct_page():
+    return render_template("fct.html")
 
 
 @app.route("/api/data/info")
@@ -1024,6 +1031,13 @@ def get_sku_list():
             }
         items.append({**item, "stock": ref})
     return jsonify({"items": items, "data_end": df[COLS.date].max().strftime("%Y-%m")})
+
+
+@app.route("/api/fct-backtest")
+def get_fct_backtest():
+    if not FCT_FILE.exists():
+        return jsonify({"error": "尚未產生 FCT 對照資料（執行 python build_fct_backtest.py）"}), 404
+    return app.response_class(FCT_FILE.read_text(encoding="utf-8"), mimetype="application/json")
 
 
 @app.route("/api/records/shared")
